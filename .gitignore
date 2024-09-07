@@ -134,3 +134,4 @@ cython_debug/
 
 # Ignore VSCode settings
 .vscode/
+.DS_Store
