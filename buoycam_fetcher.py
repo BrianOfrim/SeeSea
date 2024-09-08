@@ -9,6 +9,8 @@ import datetime
 import easyocr
 import logging
 
+# Retrieve, process and save buoycam images from the NOAA buoycam website
+
 # util functions
 BUOYCAM_LIST_URL = "https://www.ndbc.noaa.gov/buoycams.php"
 BUOYCAM_IMAGE_FILE_URL_BASE = "https://www.ndbc.noaa.gov/images/buoycam/"
@@ -117,6 +119,8 @@ if __name__ == '__main__':
     ocr_reader = OCR()
 
     image_count = 0
+
+
     for buoy_cam in buoy_cam_list:
         if "id" not in buoy_cam or "name" not in buoy_cam or "img" not in buoy_cam:
             LOGGER.error(f"Buoycam does not have all required fields. Invalid dictionary: {buoy_cam}")
