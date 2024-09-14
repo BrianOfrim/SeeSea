@@ -1,4 +1,5 @@
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageStat
 from io import BytesIO
 import matplotlib.pyplot as plt
@@ -7,6 +8,7 @@ import numpy as np
 import datetime
 import easyocr
 import logging
+from dataclasses import dataclass
 
 # Retrieve, process and save buoycam images from the NOAA buoycam website
 
@@ -19,7 +21,15 @@ IMAGE_HEIGHT = 300
 SUB_IMAGE_WIDTH = 480
 SUB_IMAGE_HEIGHT = 270
 
+FRACTION_BLACK_THRESHOLD = 0.85
+
+
 LOGGER = logging.getLogger(__name__)
+
+
+def get_json(url):
+    response = requests.get(url)
+    return response.json()
 
 
 class OCR:
@@ -65,9 +75,26 @@ class OCR:
         return angle
 
 
-def get_json(url):
-    response = requests.get(url)
-    return response.json()
+class BuoyImageRequest:
+    def __init__(self, id, tag, date):
+        self.id: str = id
+        self.tag: str = tag
+        self.date: datetime.datetime = date
+
+    def date_string(self):
+        return self.date.strftime("%Y_%m_%d_%H%M")
+
+    def image_name(self):
+        return f"{self.tag}_{self.date_string()}"
+
+    def image_filename(self):
+        return f"{self.image_name()}.jpg"
+
+    def url(self):
+        return f"{BUOYCAM_IMAGE_FILE_URL_BASE}{self.image_filename()}"
+
+    def __str__(self):
+        return f"BuoyImageRequest(id={self.id}, tag={self.tag}, date={self.date})"
 
 
 def extract_date_string(filename):
@@ -97,54 +124,58 @@ def date_string_to_date(date_string):
     return datetime.datetime(year, month, day, hour, minute, tzinfo=datetime.timezone.utc)
 
 
-def get_buoycam_image_file(image_filename):
-    url = BUOYCAM_IMAGE_FILE_URL_BASE + image_filename
-    LOGGER.debug(f"Getting image file from {url}")
+def get_image_file(url):
     response = requests.get(url)
     if response.status_code != 200:
-        LOGGER.debug(f"Failed to get image file {image_filename}")
+        LOGGER.debug(f"Failed to get image file at {url}")
         return None
-    img = Image.open(BytesIO(response.content))
-    return img
+    LOGGER.debug(f"Image file retrieved from {url}")
+    return Image.open(BytesIO(response.content))
 
 
 def date_to_date_string(date):
     return date.strftime("%Y_%m_%d_%H%M")
 
 
-def fetch_and_process_image(station_id, station_tag, station_name, date, ocr_reader):
-    img_datetime_string = date_to_date_string(date)
-
-    img_name = f"{station_tag}_{img_datetime_string}"
-    img_filename = f"{img_name}.jpg"
-    LOGGER.debug(f"\tImage filename: {img_filename}")
-
-    # Get the image file
-    img = get_buoycam_image_file(img_filename)
-    if img is None:
-        return False
-    LOGGER.info(f"\tBuoycam {station_id}: {img_name} image retrieved")
-
-    # Display the full image
-    # plt.title(f"{station_id}")
-    # plt.imshow(img)
-    # plt.axis("off")
-    # plt.show()
-
-    # Verify the image size
-    if img.width != IMAGE_WIDTH or img.height != IMAGE_HEIGHT:
-        LOGGER.warn(f"\tBuoycam {station_id}: {station_name} image has invalid dimensions {img.width}x{img.height}")
-        return False
-
-    # Extract the sub images from the full image
+def split_image(img):
     sub_images = []
     for i in range(BUOYCAM_IMAGE_ROW_LENGTH):
         left = i * SUB_IMAGE_WIDTH
         sub_img = img.crop((left, 0, left + SUB_IMAGE_WIDTH, SUB_IMAGE_HEIGHT))
         sub_images.append(sub_img)
+    return sub_images
+
+
+# the fraction of the image that is black
+def fraction_black(img):
+    img_array = np.array(img.convert("L")).flatten()
+    return np.count_nonzero(img_array == 0) / len(img_array)
+
+
+def fetch_and_process_image(request: BuoyImageRequest, ocr_reader: None):
+
+    img_datetime_string = request.date_string()
+
+    img_name = request.image_name()
+    img_filename = request.image_filename()
+    LOGGER.debug(f"\tImage filename: {img_filename}")
+
+    # Get the image file
+    img = get_image_file(request.url())
+    if img is None:
+        LOGGER.debug(f"\t{request} failed")
+        return False
+
+    # Verify the image size
+    if img.width != IMAGE_WIDTH or img.height != IMAGE_HEIGHT:
+        LOGGER.warning(f"\t{request}: image has invalid dimensions {img.width}x{img.height}")
+        return False
+
+    # Extract the sub images from the full image
+    sub_images = split_image(img)
 
     # make the folder if it doesn't exist
-    dir = f"images/{img_datetime_string}/{station_id}"
+    dir = f"images/{img_datetime_string}/{request.id}"
     if not os.path.exists(dir):
         os.makedirs(dir)
 
@@ -155,55 +186,41 @@ def fetch_and_process_image(station_id, station_tag, station_name, date, ocr_rea
 
     # Save the sub images
     for i, sub_img in enumerate(sub_images):
-        mean = ImageStat.Stat(sub_img.convert("L")).mean
-        LOGGER.debug(f"\t\tSub image {i} mean gray value: {mean}")
 
-        # Run OCR on the sub image
-        image_text = ocr_reader.get_all_text_from_image(sub_img)
-
-        # Check if the OCR results contain the text "no image", case insensitive
-        if image_text is not None and "no image" in image_text.lower():
-            LOGGER.warning(f"\t\tSub image {i} for buoy {station_id} contains no image")
+        # Check if the sub image is mostly black
+        fraction_black_value = fraction_black(sub_img)
+        if fraction_black_value > FRACTION_BLACK_THRESHOLD:
+            LOGGER.debug(f"\t\tSub image {i} is {fraction_black_value * 100:.2f}% black, skipping")
             continue
+
+        LOGGER.debug(f"\t\tSub image {i} is {fraction_black_value * 100:.2f}% black")
 
         sub_img_path = f"{dir}/{img_name}_{i}.jpg"
         sub_img.save(sub_img_path)
         LOGGER.debug(f"\t\tSub image {i} saved at {sub_img_path}")
 
-    angle_crop = img.crop((150, img.height - 30, 250, img.height))
-    # plt.imshow(angle_crop)
-    # plt.axis("off")
-    # plt.show()
+    if ocr_reader is not None:
+        angle_crop = img.crop((150, img.height - 30, 250, img.height))
+        # plt.imshow(angle_crop)
+        # plt.axis("off")
+        # plt.show()
 
-    # Extract the angle from the image
-    angle = ocr_reader.get_angle_from_image(angle_crop)
-    if angle is None:
-        LOGGER.warning(f"\tFailed to extract angle from buoycam {station_id}: {station_name}")
-    else:
-        LOGGER.debug(f"\tExtracted angle: {angle}")
-        # Save the angle
-        angle_path = f"{dir}/angle.txt"
-        with open(angle_path, "w") as file:
-            file.write(str(angle))
+        # Extract the angle from the image
+        angle = ocr_reader.get_angle_from_image(angle_crop)
+        if angle is None:
+            LOGGER.warning(f"\tFailed to extract angle from buoycam {station_id}: {station_name}")
+        else:
+            LOGGER.debug(f"\tExtracted angle: {angle}")
+            # Save the angle
+            angle_path = f"{dir}/angle.txt"
+            with open(angle_path, "w") as file:
+                file.write(str(angle))
 
     return True
 
 
-if __name__ == "__main__":
-    LOGGER.setLevel(logging.INFO)
-    LOGGER.addHandler(logging.StreamHandler())
-    LOGGER.info("Starting buoycam fetcher")
-
-    buoy_cam_list = get_json(BUOYCAM_LIST_URL)
-
-    LOGGER.info(f"Found {len(buoy_cam_list)} buoycams")
-
-    ocr_reader = OCR()
-
-    oldest_image_date = None
-    success_count = 0
-    fault_count = 0
-
+def generate_requests(buoy_cam_list) -> list[BuoyImageRequest]:
+    image_requests = []
     for buoy_cam in buoy_cam_list:
         if "id" not in buoy_cam or "name" not in buoy_cam or "img" not in buoy_cam:
             LOGGER.error(f"Buoycam does not have all required fields. Invalid dictionary: {buoy_cam}")
@@ -214,44 +231,64 @@ if __name__ == "__main__":
             LOGGER.error(f"Buoycam does not have an id. Invalid dictionary: {buoy_cam}")
             continue
 
-        name = buoy_cam["name"]
-        if name is None:
-            LOGGER.error(f"Buoycam {station_id} does not have a name. Invalid dictionary: {buoy_cam}")
-            continue
         img_filename = buoy_cam["img"]
-
         if img_filename is None:
-            LOGGER.warning(f"Buoycam {station_id}: {name} does not have an image")
+            LOGGER.warning(f"Buoycam {station_id}: does not have an image")
             continue
-
-        img_name = img_filename.split(".")[0]
 
         # before the first '_"
         station_tag = img_filename.split("_")[0]
-        LOGGER.debug(f"Station tag: {station_tag}")
 
         img_datetime_string = extract_date_string(img_filename)
 
         if img_datetime_string is None:
-            LOGGER.error(f"Buoycam {station_id}: {name} has an invalid image filename: {img_filename}")
+            LOGGER.error(f"Buoycam {station_id}: has an invalid image filename: {img_filename}")
             continue
 
         latest_img_date = date_string_to_date(img_datetime_string)
 
         if latest_img_date is None:
-            LOGGER.error(f"Buoycam {station_id}: {name} has an invalid image date: {img_datetime_string}")
+            LOGGER.error(f"Buoycam {station_id}: has an invalid image date: {img_datetime_string}")
             continue
 
-        image_dates = [latest_img_date - datetime.timedelta(minutes=10 * i) for i in range(48 * 6)]
+        image_dates = [latest_img_date - datetime.timedelta(minutes=10 * i) for i in range(73 * 6)]
 
-        LOGGER.info(f"Buoycam {station_id}: latest image date: {img_datetime_string}")
+        image_requests.extend([BuoyImageRequest(station_id, station_tag, date) for date in image_dates])
+    return image_requests
 
-        for date in image_dates:
-            success = fetch_and_process_image(station_id, station_tag, name, date, ocr_reader)
-            if success:
-                success_count += 1
-                if oldest_image_date is None or date < oldest_image_date:
-                    oldest_image_date = date
-            else:
-                fault_count += 1
-    print(f"Success count: {success_count}, Fault count: {fault_count}, oldest image date: {oldest_image_date}")
+
+if __name__ == "__main__":
+    LOGGER.setLevel(logging.INFO)
+    LOGGER.addHandler(logging.StreamHandler())
+    LOGGER.info("Starting buoycam fetcher")
+
+    timer = datetime.datetime.now()
+
+    buoy_cam_list = get_json(BUOYCAM_LIST_URL)
+
+    LOGGER.info(f"Found {len(buoy_cam_list)} buoycams")
+
+    ocr_reader = None  # OCR()
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    oldest_image_date = None
+    success_count = 0
+    fault_count = 0
+
+    image_requests = generate_requests(buoy_cam_list)
+
+    LOGGER.info(f"Generated {len(image_requests)} image requests")
+
+    results = []
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures_to_request = {
+            executor.submit(fetch_and_process_image, request, ocr_reader): request for request in image_requests
+        }
+
+        for future in as_completed(futures_to_request):
+            request = futures_to_request[future]
+            results.append((request, future.result()))
+            LOGGER.info(f"Completed {request}, success: {future.result()}")
+
+    LOGGER.info(f"Completed all requests in {datetime.datetime.now() - timer}")
