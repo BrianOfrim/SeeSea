@@ -8,9 +8,11 @@ import numpy as np
 import datetime
 import easyocr
 import logging
-from dataclasses import dataclass
+import threading
+import time
 
 # Retrieve, process and save buoycam images from the NOAA buoycam website
+
 
 # util functions
 BUOYCAM_LIST_URL = "https://www.ndbc.noaa.gov/buoycams.php"
@@ -22,6 +24,11 @@ SUB_IMAGE_WIDTH = 480
 SUB_IMAGE_HEIGHT = 270
 
 FRACTION_BLACK_THRESHOLD = 0.85
+
+# Rate limiting lock to be nice to the NOAA buoycam website
+request_rate_limit_lock = threading.Lock()
+# Max requests per second
+MAX_REQUESTS_PER_SECOND = 10
 
 
 LOGGER = logging.getLogger(__name__)
@@ -153,6 +160,10 @@ def fraction_black(img):
 
 
 def fetch_and_process_image(request: BuoyImageRequest, ocr_reader: None):
+
+    # Simple rate limiting mechanism to be nice to the NOAA buoycam website
+    with request_rate_limit_lock:
+        time.sleep(1 / MAX_REQUESTS_PER_SECOND)
 
     img_datetime_string = request.date_string()
 
