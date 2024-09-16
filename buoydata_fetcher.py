@@ -99,7 +99,7 @@ def get_float(dict: dict, key: str, convert_func=None) -> float:
 def table_row_to_db_entry(row, station_id):
     return {
         "station_id": station_id,
-        "timestamp": f'{row["YY"]}-{row["MM"]}-{row["DD"]} {row["hh"]}:00',
+        "timestamp": f'{row["YY"]}_{row["MM"]}_{row["DD"]}_{row["hh"]}{row["mm"]}',
         "wind_speed_kts": get_float(row, "WSPD", mps_to_kts),
         "wind_direction_deg": get_float(row, "WDIR"),
         "gust_speed_kts": get_float(row, "GST", mps_to_kts),
