@@ -99,9 +99,10 @@ class BuoyImageRequest:
     BuoyImageRequest is a class that encapsulates the information needed for a request to get a buoycam image.
     """
 
-    def __init__(self, station_id, station_tag, date):
+    def __init__(self, station_id, station_tag, desciption, date):
         self.id: str = station_id
         self.tag: str = station_tag
+        self.description: str = desciption
         self.date: datetime.datetime = date
 
     def date_string(self):
@@ -115,6 +116,12 @@ class BuoyImageRequest:
 
     def url(self):
         return f"{BUOYCAM_IMAGE_FILE_URL_BASE}{self.image_filename()}"
+
+    def save_directory(self, root="images"):
+        return f"{root}/{self.id}/{self.date_string()}"
+    
+    def save_image_full_path(self, postfix=""):
+        return f"{self.save_directory()}/{self.image_name()}{f"_{postfix}" if postfix else ""}.jpg"
 
     def __str__(self):
         return f"BuoyImageRequest(id={self.id}, tag={self.tag}, date={self.date})"
@@ -240,8 +247,9 @@ class Observation:
         return f"Observation(timestamp={self.timestamp}, wind_speed_kts={self.wind_speed_kts}, wind_direction_deg={self.wind_direction_deg}, gust_speed_kts={self.gust_speed_kts}, wave_height_m={self.wave_height_m}, dominant_wave_period_s={self.dominant_wave_period_s}, average_wave_period_s={self.average_wave_period_s}, mean_wave_direction_deg={self.mean_wave_direction_deg}, atmospheric_pressure_hpa={self.atmospheric_pressure_hpa}, air_temperature_c={self.air_temperature_c}, water_temperature_c={self.water_temperature_c}, dewpoint_temperature_c={self.dewpoint_temperature_c}, visibility_m={self.visibility_m}, pressure_tendency_hpa={self.pressure_tendency_hpa}, tide_m={self.tide_m})"
 
 
-def get_observation_str_for_file(station_id: str, lat_deg: float, lon_deg: float, observation: Observation):
+def get_observation_str_for_file(station_id: str, description: str, lat_deg: float, lon_deg: float, observation: Observation):
     s = f"id {station_id}\n"
+    s += f"description {description}\n"
     s += f"timestamp {observation.timestamp}\n"
     s += f"lat_deg {lat_deg}\n"
     s += f"lon_deg {lon_deg}\n"
@@ -267,12 +275,13 @@ class BuoyData:
     A collection of observations for a buoy.
     """
 
-    def __init__(self, station_id: str, lat_deg: float = None, lon_deg: float = None):
+    def __init__(self, station_id: str, description: str = "", lat_deg: float = None, lon_deg: float = None):
         self.id = station_id
         # key is the date string, value is the observation
         self.observations: Dict[str, Observation] = {}
         self.lat_deg = lat_deg
         self.lon_deg = lon_deg
+        self.description = description
 
     def add_observation(self, observation: Observation):
         self.observations[observation.timestamp] = observation
@@ -325,15 +334,6 @@ def get_observation_data(station_id) -> BuoyData:
         observation = table_row_to_observation(row)
         if observation is not None:
             data.add_observation(observation)
-    return data
-
-
-def get_observations(station_ids: List[str]) -> Dict[str, BuoyData]:
-    data = {}
-    for station_id in station_ids:
-        observation_data = get_observation_data(station_id)
-        if observation_data is not None:
-            data[station_id] = observation_data
     return data
 
 
@@ -392,17 +392,24 @@ def fraction_black(img):
     return np.count_nonzero(img_array == 0) / len(img_array)
 
 
+def get_angle_from_image(img: Image, ocr_reader: OCR):
+    assert img.width == IMAGE_WIDTH and img.height == IMAGE_HEIGHT
+    angle_crop = img.crop((150, img.height - 30, 250, img.height))
+    # plt.imshow(angle_crop)
+    # plt.axis("off")
+    # plt.show()
+
+    # Extract the angle from the image
+    return ocr_reader.get_angle_from_image(angle_crop)
+
+
 def fetch_and_process_image(request: BuoyImageRequest, buoy_data: BuoyData, ocr_reader: OCR = None) -> bool:
 
     # Simple rate limiting mechanism to be nice to the NOAA buoycam website
     with request_rate_limit_lock:
         time.sleep(1 / MAX_REQUESTS_PER_SECOND)
 
-    img_datetime_string = request.date_string()
-
-    img_name = request.image_name()
-    img_filename = request.image_filename()
-    LOGGER.debug("\tImage filename: %s", img_filename)
+    LOGGER.debug("\tImage filename: %s", request.image_filename())
 
     # Get the image file
     img = get_image_file(request.url())
@@ -419,18 +426,17 @@ def fetch_and_process_image(request: BuoyImageRequest, buoy_data: BuoyData, ocr_
     sub_images = split_image(img)
 
     # make the folder if it doesn't exist
-    img_dir = f"images/{request.id}/{img_datetime_string}"
-    if not os.path.exists(img_dir):
-        os.makedirs(img_dir)
+    # img_dir = request.save_directory()
+    if not os.path.exists(request.save_directory()):
+        os.makedirs(request.save_directory())
 
     # Save the full image
-    full_image_path = f"{img_dir}/{img_name}_full.jpg"
+    full_image_path = request.save_image_full_path("full")
     img.save(full_image_path)
     LOGGER.debug("\tFull image saved at %s", full_image_path)
 
     # Save the sub images
     for i, sub_img in enumerate(sub_images):
-
         # Check if the sub image is mostly black
         fraction_black_value = fraction_black(sub_img)
         if fraction_black_value > FRACTION_BLACK_THRESHOLD:
@@ -439,34 +445,29 @@ def fetch_and_process_image(request: BuoyImageRequest, buoy_data: BuoyData, ocr_
 
         LOGGER.debug("\t\tSub image %i is %.2f%% black", i, fraction_black_value * 100)
 
-        sub_img_path = f"{img_dir}/{img_name}_{i}.jpg"
+        sub_img_path = request.save_image_full_path(str(i))
         sub_img.save(sub_img_path)
         LOGGER.debug("\t\tSub image %d saved at %s", i, sub_img_path)
 
-    if buoy_data.has_observation(img_datetime_string):
-        observation = buoy_data.get_observation(img_datetime_string)
-        LOGGER.debug("\tObservation for buoy %s at %s: %s", request, img_datetime_string, observation)
+    if buoy_data.has_observation(request.date_string()):
+        observation = buoy_data.get_observation(request.date_string())
+        LOGGER.debug("\tObservation for buoy %s at %s: %s", request, request.date_string(), observation)
         # Save the observation data
-        observation_path = f"{img_dir}/observation.txt"
+        observation_path = f"{request.save_directory()}/observation.txt"
         with open(observation_path, "w", encoding="utf-8") as file:
-            file.write(get_observation_str_for_file(request.id, buoy_data.lat_deg, buoy_data.lon_deg, observation))
+            file.write(get_observation_str_for_file(request.id, buoy_data.description, buoy_data.lat_deg, buoy_data.lon_deg, observation))
     else:
-        LOGGER.warning("\tNo observation data for buoy %s at %s", request.id, img_datetime_string)
+        LOGGER.warning("\tNo observation data for buoy %s at %s", request.id, request.date_string())
 
     if ocr_reader is not None:
-        angle_crop = img.crop((150, img.height - 30, 250, img.height))
-        # plt.imshow(angle_crop)
-        # plt.axis("off")
-        # plt.show()
+        angle = get_angle_from_image(img, ocr_reader)
 
-        # Extract the angle from the image
-        angle = ocr_reader.get_angle_from_image(angle_crop)
         if angle is None:
             LOGGER.warning("\tFailed to extract angle from buoycam %s", request.id)
         else:
             LOGGER.debug("\tExtracted angle: %d", angle)
             # Save the angle
-            angle_path = f"{img_dir}/angle.txt"
+            angle_path = f"{request.save_directory()}/angle.txt"
             with open(angle_path, "w", encoding="utf-8") as file:
                 file.write(str(angle))
 
@@ -509,7 +510,7 @@ def generate_requests(buoy_cam_list) -> list[BuoyImageRequest]:
             latest_img_date - datetime.timedelta(minutes=10 * i) for i in range(NUMBER_OF_HOURS_TO_GET_IMAGES_FOR * 6)
         ]
 
-        image_requests.extend([BuoyImageRequest(station_id, station_tag, date) for date in image_dates])
+        image_requests.extend([BuoyImageRequest(station_id, station_tag, buoy_cam["name"] , date) for date in image_dates])
     return image_requests
 
 
@@ -537,6 +538,7 @@ def main():
             LOGGER.info("Completed observation request for %s, success: %s", buoy["id"], result is not None)
 
             if result is not None:
+                result.description = buoy["name"] if "name" in buoy else None
                 result.lat_deg = float(buoy["lat"]) if "lat" in buoy else None
                 result.lon_deg = float(buoy["lng"]) if "lng" in buoy else None
                 buoy_data_lookup[result.id] = result
