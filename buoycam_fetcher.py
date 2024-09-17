@@ -32,7 +32,9 @@ NUMBER_OF_HOURS_TO_GET_IMAGES_FOR = 24
 # Rate limiting lock to be nice to the NOAA buoycam website
 request_rate_limit_lock = threading.Lock()
 # Max requests per second
-MAX_REQUESTS_PER_SECOND = 10
+MAX_REQUESTS_PER_SECOND = 50
+# Number of worker threads
+NUM_WORKER_THREADS = 50
 
 
 LOGGER = logging.getLogger(__name__)
@@ -279,7 +281,9 @@ class BuoyData:
         return timestamp in self.observations
 
     def get_observation(self, timestamp):
-        return self.observations[timestamp]
+        if self.has_observation(timestamp):
+            return self.observations[timestamp]
+        return None
 
 
 def table_row_to_observation(row):
@@ -415,7 +419,7 @@ def fetch_and_process_image(request: BuoyImageRequest, buoy_data: BuoyData, ocr_
     sub_images = split_image(img)
 
     # make the folder if it doesn't exist
-    img_dir = f"images/{img_datetime_string}/{request.id}"
+    img_dir = f"images/{request.id}/{img_datetime_string}"
     if not os.path.exists(img_dir):
         os.makedirs(img_dir)
 
@@ -522,7 +526,7 @@ def main():
 
     # Observation look up object
     buoy_data_lookup: Dict[str, BuoyData] = {}
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=NUM_WORKER_THREADS) as executor:
         futures_to_input = {
             executor.submit(get_observation_data, buoy["id"]): buoy for buoy in buoy_cam_list if "id" in buoy
         }
@@ -541,7 +545,7 @@ def main():
 
     LOGGER.info("Retrieved observation data for %s buoycams", len(buoy_data_lookup))
 
-    ocr_reader = None  # OCR()
+    ocr_reader = OCR()
 
     # Generate image requests for all buoycams that have observation data
     image_requests = generate_requests([b for b in buoy_cam_list])
@@ -559,16 +563,14 @@ def main():
     LOGGER.info("Generated %s image requests", len(filtered_requests))
 
     timer = nowutc()
-
     results = []
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=NUM_WORKER_THREADS) as executor:
 
         futures_to_request = {}
 
         for request in filtered_requests:
-            observation = buoy_data_lookup[request.id].get_observation(request.date_string())
-            future = executor.submit(fetch_and_process_image, request, observation, ocr_reader)
+            future = executor.submit(fetch_and_process_image, request, buoy_data_lookup[request.id], ocr_reader)
             futures_to_request[future] = request
 
         for future in as_completed(futures_to_request):
@@ -580,7 +582,7 @@ def main():
 
 
 if __name__ == "__main__":
-    LOGGER.setLevel(logging.DEBUG)
+    LOGGER.setLevel(logging.INFO)
     LOGGER.addHandler(logging.StreamHandler())
     LOGGER.info("Starting buoycam fetcher")
     main()
