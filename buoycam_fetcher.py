@@ -28,14 +28,14 @@ FRACTION_BLACK_THRESHOLD = 0.85
 
 MISSING_DATA_INDICATOR = "MM"
 
-NUMBER_OF_HOURS_TO_GET_IMAGES_FOR = 24
+NUMBER_OF_HOURS_TO_GET_IMAGES_FOR = 73
 
 # Rate limiting lock to be nice to the NOAA buoycam website
 request_rate_limit_lock = threading.Lock()
 # Max requests per second
-MAX_REQUESTS_PER_SECOND = 50
+MAX_REQUESTS_PER_SECOND = 30
 # Number of worker threads
-NUM_WORKER_THREADS = 50
+NUM_WORKER_THREADS = 30
 
 
 LOGGER = logging.getLogger(__name__)
