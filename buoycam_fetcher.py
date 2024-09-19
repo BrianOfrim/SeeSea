@@ -28,7 +28,6 @@ FRACTION_BLACK_THRESHOLD = 0.85
 
 MISSING_DATA_INDICATOR = "MM"
 
-NUMBER_OF_HOURS_TO_GET_IMAGES_FOR = 73
 
 # Rate limiting lock to be nice to the NOAA buoycam website
 request_rate_limit_lock = threading.Lock()
@@ -127,7 +126,6 @@ class BuoyImageRequest:
 
     def __str__(self):
         return f"BuoyImageRequest(id={self.id}, tag={self.tag}, date={self.date})"
-
 
 def extract_table_data(url: str) -> list:
     response = requests.get(url, timeout=10)
@@ -473,7 +471,7 @@ def fetch_and_process_image(request: BuoyImageRequest, buoy_data: BuoyData, outp
 
     return True
 
-def generate_requests(buoy_cam_list, output_dir) -> list[BuoyImageRequest]:
+def generate_requests(buoy_cam_list, output_dir, hours_in_past) -> list[BuoyImageRequest]:
     image_requests = []
     for buoy_cam in buoy_cam_list:
         if "id" not in buoy_cam or "name" not in buoy_cam or "img" not in buoy_cam:
@@ -506,7 +504,7 @@ def generate_requests(buoy_cam_list, output_dir) -> list[BuoyImageRequest]:
             continue
 
         image_dates = [
-            latest_img_date - datetime.timedelta(minutes=10 * i) for i in range(NUMBER_OF_HOURS_TO_GET_IMAGES_FOR * 6)
+            latest_img_date - datetime.timedelta(minutes=10 * i) for i in range(hours_in_past * 6)
         ]
 
         image_requests.extend([BuoyImageRequest(station_id, station_tag, buoy_cam["name"] , date, output_dir) for date in image_dates])
@@ -522,9 +520,30 @@ def main():
 
     parser.add_argument("--output", type=str, help="Output directory for images and observation data", default="images")
 
+    parser.add_argument("--log", type=str, help="Log level", default="INFO")
+
+    parser.add_argument("--log-file", type=str, help="Log file", default=None)
+
+    parser.add_argument("--hours", type=int, help="Number of hours in the past to retrieve images for", default=24)
+
     # Parse the arguments
     args = parser.parse_args()
 
+    # setup the loggers
+    LOGGER.setLevel(args.log)
+
+    formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    LOGGER.addHandler(console_handler)
+    
+
+    if args.log_file is not None:
+        file_handler = logging.FileHandler(args.log_file)
+        file_handler.setFormatter(formatter)
+        LOGGER.addHandler(file_handler)
+
+    LOGGER.info("Starting buoycam fetcher, getting images for the last %d hours", args.hours)
     timer = nowutc()
 
     buoy_cam_list = get_json(BUOYCAM_LIST_URL)
@@ -557,7 +576,7 @@ def main():
     ocr_reader = OCR()
 
     # Generate image requests for all buoycams that have observation data
-    image_requests = generate_requests([b for b in buoy_cam_list], args.output)
+    image_requests = generate_requests([b for b in buoy_cam_list], args.output, args.hours)
 
     # only request images that we have observation data for
     filtered_requests = []
@@ -591,7 +610,4 @@ def main():
 
 
 if __name__ == "__main__":
-    LOGGER.setLevel(logging.INFO)
-    LOGGER.addHandler(logging.StreamHandler())
-    LOGGER.info("Starting buoycam fetcher")
     main()
