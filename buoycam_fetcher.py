@@ -460,22 +460,39 @@ def fetch_image(request: BuoyInfo) -> Image:
     return img
 
 
-def extend_to_past(latest_list: List[BuoyInfo], hours_in_past) -> list[BuoyInfo]:
+def change_date(info: BuoyInfo, new_date: datetime.datetime) -> BuoyInfo:
+    return BuoyInfo(info.id, info.tag, info.description, info.position, new_date)
+
+
+def extend_to_past(latest_list: List[BuoyInfo], hours_in_past: int, minute_list: List[int]) -> list[BuoyInfo]:
     extended_list = []
     for latest in latest_list:
-        # Added
-        extended_list.extend(
-            [
-                BuoyInfo(
-                    latest.id,
-                    latest.tag,
-                    latest.description,
-                    latest.position,
-                    latest.date - datetime.timedelta(minutes=10 * i),
-                )
-                for i in range(0, hours_in_past * 6)
-            ]
+        # Always add the latest image since we know it exists
+        extended_list.append(latest)
+
+        if hours_in_past < 1:
+            continue
+
+        # For the first hour, add the minutes in the minute list if they are before the latest image
+        for minute in minute_list:
+            if minute < latest.date.minute:
+                extended_list.append(change_date(latest, latest.date.replace(minute=minute)))
+
+        # For the rest of the hours, add all the minutes in the minute list
+        for i in range(1, hours_in_past):
+            # Get the start of the hour by subtracting i hours and zeroing out everything less than an hour
+            hour_start = (latest.date - datetime.timedelta(hours=i)).replace(minute=0, second=0, microsecond=0)
+
+            for minute in minute_list:
+                extended_list.append(change_date(latest, hour_start.replace(minute=minute)))
+
+        # For the last hour, add all the minutes in the minute list that are after the latest image minute
+        last_hour_start = (latest.date - datetime.timedelta(hours=hours_in_past)).replace(
+            minute=0, second=0, microsecond=0
         )
+        for minute in minute_list:
+            if minute >= latest.date.minute:
+                extended_list.append(change_date(latest, last_hour_start.replace(minute=minute)))
 
     return extended_list
 
@@ -539,24 +556,43 @@ def image_pipeline(info: BuoyInfo, observation: Observation, output_dir: str, oc
     return True
 
 
+def already_fetched(info: BuoyInfo, output_dir: str) -> bool:
+    if not os.path.exists(info.save_directory(output_dir)):
+        return False
+
+    # Check if the observation data is saved
+    if not os.path.exists(f"{info.save_directory(output_dir)}/observation.json"):
+        return False
+
+    # Check if the full image is saved
+    if not os.path.exists(info.image_full_path(output_dir, "full")):
+        return False
+
+    return True
+
+
 def main(args):
 
-    LOGGER.info("Starting buoycam fetcher, getting images for the last %d hours", args.hours)
+    LOGGER.info(
+        "Starting buoycam fetcher, getting images for the last %d hours. %s",
+        args.hours_in_past,
+        f"For minutes matching: {args.minute_list}." if args.minute_list else "For all 10 minute aligned intervals",
+    )
 
-    latest_info = get_latest_buoy_info()
+    latest_info_list = get_latest_buoy_info()
 
-    if latest_info is None:
+    if latest_info_list is None:
         LOGGER.fatal("Failed to get the buoy list")
         return
 
-    LOGGER.info("Found %d buoycams", len(latest_info))
+    LOGGER.info("Found %d buoycams", len(latest_info_list))
 
     # Observation look up object
     buoy_data_lookup: Dict[str, BuoyData] = {}
 
     # Get observation data for all buoycams
     with ThreadPoolExecutor(max_workers=NUM_WORKER_THREADS) as executor:
-        futures_to_input = {executor.submit(get_observation_data, info): info for info in latest_info}
+        futures_to_input = {executor.submit(get_observation_data, info): info for info in latest_info_list}
 
         for future in as_completed(futures_to_input):
             result = future.result()
@@ -575,18 +611,32 @@ def main(args):
     ocr_reader = OCR()
 
     # Generate image requests for all buoycams that have observation data
-    image_requests = extend_to_past([info for info in latest_info], args.hours)
+    if args.hours_in_past < 1:
+        LOGGER.info("Only fetching the latest images")
+        image_requests = latest_info_list
+    else:
+        image_requests = extend_to_past([info for info in latest_info_list], args.hours_in_past, args.minute_list)
 
-    # Only request images that we have observation data for
+    # Only request images that we have observation data for and that we haven't already fetched
     filtered_requests = []
     for ir in image_requests:
         if ir.id not in buoy_data_lookup:
             LOGGER.warning("Buoy %s does not have observation data", ir.id)
+            continue
         if not buoy_data_lookup[ir.id].has_observation(ir.date_string()):
             LOGGER.warning("Buoy %s does not have observation data for %s", ir.id, ir.date_string())
+            continue
+
+        if already_fetched(ir, args.output):
+            LOGGER.debug("Buoy %s at %s already fetched", ir.id, ir.date_string())
+            continue
+
         filtered_requests.append(ir)
 
     LOGGER.info("Generated %s image requests", len(filtered_requests))
+
+    # store the results [pass, fail] of the image requests according to the minute
+    minute_result_map: Dict[int, List[int]] = {}
 
     # Fetch, process and save the images
     with ThreadPoolExecutor(max_workers=NUM_WORKER_THREADS) as executor:
@@ -600,7 +650,14 @@ def main(args):
         for future in as_completed(futures_to_request):
             result = future.result()
             request = futures_to_request[future]
-            LOGGER.info("Completed %s, success: %s", request, future.result())
+            LOGGER.info("Completed %s, success: %s", request, result)
+            if minute_result_map.get(request.date.minute) is None:
+                minute_result_map[request.date.minute] = [0, 0]
+            minute_result_map[request.date.minute][int(result)] += 1
+
+    LOGGER.info("Requests complete. Results by minute:")
+    for minute, counts in minute_result_map.items():
+        LOGGER.info("\tMinute %02d:\t %d success,\t %d fail", minute, counts[int(True)], counts[int(False)])
 
 
 if __name__ == "__main__":
@@ -618,10 +675,22 @@ if __name__ == "__main__":
     arg_parser.add_argument("--log", type=str, help="Log level", default="INFO")
     arg_parser.add_argument("--log-file", type=str, help="Log file", default=None)
     arg_parser.add_argument(
-        "--hours",
+        "--hours_in_past",
         type=int,
         help="Number of hours in the past to retrieve images for",
         default=24,
+    )
+
+    arg_parser.add_argument(
+        "--minute-list",
+        nargs="+",
+        type=int,
+        help=(
+            "A list of minutes to request images for from every hour in the past. Eg. [0, 30] will request images for"
+            " the 0th and 30th minute of every hour (00:00, 00:30, 01:00, 01:30, ...). The latest image will always be"
+            " requested."
+        ),
+        default=[0, 10, 20, 30, 40, 50],
     )
 
     input_args = arg_parser.parse_args()
@@ -641,4 +710,4 @@ if __name__ == "__main__":
 
     main(input_args)
 
-    LOGGER.info("Total runtime %s", execution_start_time - time.time())
+    LOGGER.info("Total runtime %.2f", time.time() - execution_start_time)
