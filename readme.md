@@ -7,6 +7,9 @@ The current plan is to create a training dataset of labeled images by collecting
 Great Lakes Environmental Research Labs webcam images: 
 - https://www.glerl.noaa.gov/metdata/
 
+Other Great Lakes BuoyCams (images/video):
+- https://limno.io/stations/
+
 Regional Science Consortium of Presque Isle (large galary of buoy videos):
 - https://wqdatalive.com/public/55
 
