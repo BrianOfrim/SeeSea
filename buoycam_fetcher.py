@@ -465,6 +465,7 @@ def change_date(info: BuoyInfo, new_date: datetime.datetime) -> BuoyInfo:
 
 
 def extend_to_past(latest_list: List[BuoyInfo], hours_in_past: int, minute_list: List[int]) -> list[BuoyInfo]:
+    minute_list = sorted(minute_list, reverse=True)
     extended_list = []
     for latest in latest_list:
         # Always add the latest image since we know it exists
