@@ -689,7 +689,7 @@ if __name__ == "__main__":
         help=(
             "A list of minutes to request images for from every hour in the past. Eg. [0, 30] will request images for"
             " the 0th and 30th minute of every hour (00:00, 00:30, 01:00, 01:30, ...). The latest image will always be"
-            " requested."
+            " requested. By default, all 10 minute aligned intervals will be requested."
         ),
         default=[0, 10, 20, 30, 40, 50],
     )
