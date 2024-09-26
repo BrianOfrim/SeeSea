@@ -34,9 +34,9 @@ MISSING_DATA_INDICATOR = "MM"
 # Rate limiting lock to be nice to the NOAA buoycam website
 request_rate_limit_lock = threading.Lock()
 # Max requests per second
-MAX_REQUESTS_PER_SECOND = 20
+MAX_REQUESTS_PER_SECOND = 10
 
-REQUEST_TIMEOUT_SECONDS = 15
+REQUEST_TIMEOUT_SECONDS = 5
 
 # Number of worker threads
 NUM_WORKER_THREADS = 100
@@ -98,10 +98,12 @@ class BuoyInfo:
         return f"{OBSERVATION_URL}/{self.id}.txt"
 
     def save_directory(self, root_dir: str = "images"):
-        return f"{root_dir}/{self.id}/{self.date_string()}"
+        return os.path.join(root_dir, self.id, self.date_string())
 
     def image_full_path(self, root_dir: str = "images", image_suffix: str = None):
-        return f"{self.save_directory(root_dir)}/{self.image_name()}{'_' + image_suffix if image_suffix else ""}.jpg"
+        return os.path.join(
+            self.save_directory(root_dir), f"{self.image_name()}{'_' + image_suffix if image_suffix else ''}.jpg"
+        )
 
 
 class Observation:
@@ -418,10 +420,10 @@ def get_image_file(url):
     try:
         response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
     except requests.exceptions.RequestException as e:
-        LOGGER.debug("Failed to get image file at %s due to %s", url, e)
+        LOGGER.warning("Failed to get image file at %s due to %s", url, e)
         return None
     if response.status_code != 200:
-        LOGGER.debug("Failed to get image file at %s", url)
+        LOGGER.debug("Failed to get image file at %s, code: %d, reason: %s", url, response.status_code, response.reason)
         return None
     LOGGER.debug("Image file retrieved from %s ", url)
     return Image.open(BytesIO(response.content))
@@ -503,7 +505,7 @@ def save_observation_data(observation: Observation, info: BuoyInfo, output_dir: 
     if not os.path.exists(info.save_directory(output_dir)):
         os.makedirs(info.save_directory(output_dir))
 
-    observation_path = f"{info.save_directory(output_dir)}/observation.json"
+    observation_path = os.path.join(info.save_directory(output_dir), "observation.json")
     with open(observation_path, "w", encoding="utf-8") as file:
         file.write(observation.to_json())
 
@@ -562,7 +564,7 @@ def already_fetched(info: BuoyInfo, output_dir: str) -> bool:
         return False
 
     # Check if the observation data is saved
-    if not os.path.exists(f"{info.save_directory(output_dir)}/observation.json"):
+    if not os.path.exists(os.path.join(info.save_directory(output_dir), "observation.json")):
         return False
 
     # Check if the full image is saved
@@ -711,4 +713,4 @@ if __name__ == "__main__":
 
     main(input_args)
 
-    LOGGER.info("Total runtime %.2f", time.time() - execution_start_time)
+    LOGGER.info("Total runtime %.2fs", time.time() - execution_start_time)
