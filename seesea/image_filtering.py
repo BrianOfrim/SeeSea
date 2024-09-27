@@ -7,6 +7,7 @@ import logging
 
 import numpy as np
 import matplotlib.pyplot as plt
+import re
 
 import seesea.utils as utils
 
@@ -36,6 +37,13 @@ if __name__ == "__main__":
     arg_parser.add_argument(
         "--max-brightness", type=int, help="The maximum average image brightness to include in the dataset", default=255
     )
+    arg_parser.add_argument(
+        "--observation-keys",
+        nargs="+",
+        type=str,
+        help="Values that must be present in the observation in order to include it's images in the dataset",
+        default=None,
+    )
     input_args = arg_parser.parse_args()
 
     # setup the loggers
@@ -55,9 +63,30 @@ if __name__ == "__main__":
     if not os.path.exists(input_args.output):
         os.makedirs(input_args.output)
 
-    image_paths = utils.get_image_paths(input_args.input)
+    observation_paths = utils.get_all_files(input_args.input, re.compile(r"observation.json", re.IGNORECASE))
+    image_paths = []
+    for obs in observation_paths:
 
-    LOGGER.info("Found %d image files under %s", len(image_paths), input_args.input)
+        if input_args.observation_keys is not None:
+            observation_json = utils.load_json(obs)
+            if observation_json is None:
+                continue
+
+            # Check if the observation has non-null values for all the keys
+            if not utils.entries_exist(observation_json, input_args.observation_keys):
+                continue
+
+        # should end in N.jpg where n is a number
+        paths = utils.get_all_files(os.path.dirname(obs), re.compile(r"\d+.jpg", re.IGNORECASE))
+        # exculte images that have the pattern *full.jpg
+        image_paths.extend([p for p in paths if "full" not in p.lower()])
+
+    LOGGER.info(
+        "Found %d image files under %s with valid observation values for %s",
+        len(image_paths),
+        input_args.input,
+        input_args.observation_keys,
+    )
 
     # Get the brightnesses of all images in the dataset
     brightnesses = []

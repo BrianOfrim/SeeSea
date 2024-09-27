@@ -3,13 +3,14 @@ General Utility functions
 """
 
 import logging
+import os
+import re
+import json
+
+import requests
 from io import BytesIO
 import numpy as np
 from PIL import Image
-import os
-import re
-import requests
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -30,11 +31,16 @@ def is_match(pattern: re.Pattern, text: str) -> bool:
 
 
 def entry_exists(obj, key):
-    """Check if a key exists in a dictionary and is not None"""
+    """Check if a key exists in a dictionary and it's value is not None"""
     return key in obj and obj[key] is not None
 
 
-def get_json(url, timeout=None):
+def entries_exist(obj, keys):
+    """Check if all keys exist in a dictionary and their values are not None"""
+    return all(entry_exists(obj, key) for key in keys)
+
+
+def fetch_json(url, timeout=None):
     """Get a json object from a url"""
     try:
         response = requests.get(url, timeout=timeout)
@@ -49,7 +55,17 @@ def get_json(url, timeout=None):
     return response.json()
 
 
-def get_image_file(url, timeout=None):
+def load_json(file_path):
+    """Load a json object from a file path"""
+    try:
+        with open(file_path, "r") as file:
+            return json.load(file)
+    except Exception as e:
+        LOGGER.warning("Failed to load json from %s due to %s", file_path, e)
+        return None
+
+
+def fetch_image(url, timeout=None) -> Image:
     """Get an image file from a url"""
     try:
         response = requests.get(url, timeout=timeout)
@@ -61,6 +77,16 @@ def get_image_file(url, timeout=None):
         return None
     LOGGER.debug("Image file retrieved from %s ", url)
     return Image.open(BytesIO(response.content))
+
+
+def load_image(image_path: str) -> Image:
+    """Load an image from a file path"""
+    try:
+        img = Image.open(image_path)
+    except Exception as e:
+        LOGGER.warning("\tError loading image %s: %s", image_path, e)
+        return None
+    return img
 
 
 def get_all_files(directory, reegex_pattern: re.Pattern = None):
@@ -77,29 +103,6 @@ def get_all_files(directory, reegex_pattern: re.Pattern = None):
                 found_files.append(full_path)
 
     return found_files
-
-
-def get_image_paths(base_dir):
-    """Get all numbered images in folders with observation.json files"""
-    observation_paths = get_all_files(base_dir, re.compile(r"observation.json", re.IGNORECASE))
-    image_paths = []
-    for obs in observation_paths:
-        # should end in N.jpg where n is a number
-        paths = get_all_files(os.path.dirname(obs), re.compile(r"\d+.jpg", re.IGNORECASE))
-        # exculte images that have the pattern *full.jpg
-        image_paths.extend([p for p in paths if "full" not in p.lower()])
-
-    return image_paths
-
-
-def load_image(image_path: str) -> Image:
-    """Load an image from a file path"""
-    try:
-        img = Image.open(image_path)
-    except Exception as e:
-        LOGGER.warning("\tError loading image %s: %s", image_path, e)
-        return None
-    return img
 
 
 def fraction_black(img: Image) -> float:

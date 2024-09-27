@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime
 from seesea.buoycam_fetcher import extend_to_past, BuoyInfo, BuoyPosition
 
 
