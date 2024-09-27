@@ -3,54 +3,18 @@ A script to read images from the buoycam dataset and filter them based on bright
 """
 
 import os
-import numpy as np
-from PIL import Image
 import logging
-from typing import List
+
+import numpy as np
 import matplotlib.pyplot as plt
+
+import seesea.utils as utils
 
 LOGGER = logging.getLogger(__name__)
 
 
-def get_all_files(directory, extension):
-    # List to store found files
-    found_files = []
-
-    # Walk through the directory recursively
-    for root, dirs, files in os.walk(directory):
-        for file in files:
-            if file.endswith(extension):
-                # Get the full path of the file
-                full_path = os.path.join(os.path.abspath(root), file)
-                found_files.append(full_path)
-
-    return found_files
-
-
-def get_brightness(image_path):
-    try:
-        img = Image.open(image_path)
-    except Exception as e:
-        LOGGER.warning("\tError loading image %s: %s", image_path, e)
-        return None
-    img_array = np.array(img, dtype=np.uint8)
-    mean = np.mean(img_array)
-    return mean
-
-
-def get_image_paths(base_dir):
-    observation_paths = get_all_files(base_dir, "observation.json")
-    image_paths = []
-    for obs in observation_paths:
-        paths = get_all_files(os.path.dirname(obs), "jpg")
-        # exculte images that have the pattern *full.jpg
-        image_paths.extend([p for p in paths if "full" not in p.lower()])
-
-    return image_paths
-
-
 def show_brightness_histogram(brightness_values):
-    # Plot the histogram
+    """Show a histogram of the brightness values"""
     plt.hist(brightness_values, bins=255, color="blue", alpha=0.7)
     plt.title("Image Brightness Histogram")
     plt.xlabel("Brightness")
@@ -91,7 +55,7 @@ if __name__ == "__main__":
     if not os.path.exists(input_args.output):
         os.makedirs(input_args.output)
 
-    image_paths = get_image_paths(input_args.input)
+    image_paths = utils.get_image_paths(input_args.input)
 
     LOGGER.info("Found %d image files under %s", len(image_paths), input_args.input)
 
@@ -102,9 +66,11 @@ if __name__ == "__main__":
         # load image
         if i % 1000 == 0:
             LOGGER.debug("Read image %d", i)
-        brightness = get_brightness(image_path)
-        if brightness is not None:
-            brightnesses.append((image_path, brightness))
+        img = utils.load_image(image_path)
+        if img is None:
+            continue
+        brightness = utils.get_brightness(img)
+        brightnesses.append((image_path, brightness))
 
     # Print how many images were less than the min and how many were greater than the max
     num_images_below_min = sum(brightness < input_args.min_brightness for _, brightness in brightnesses)

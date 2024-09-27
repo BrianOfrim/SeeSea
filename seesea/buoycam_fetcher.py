@@ -3,7 +3,7 @@
 import argparse
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from io import BytesIO
+
 import json
 import logging
 import os
@@ -16,6 +16,8 @@ import requests
 from PIL import Image
 import numpy as np
 import easyocr
+
+import seesea.utils as utils
 
 BUOYCAM_LIST_URL = "https://www.ndbc.noaa.gov/buoycams.php"
 BUOYCAM_IMAGE_FILE_URL_BASE = "https://www.ndbc.noaa.gov/images/buoycam"
@@ -242,37 +244,19 @@ class OCR:
         return angle
 
 
-def entry_exists(obj, key):
-    return key in obj and obj[key] is not None
-
-
-def get_json(url):
-    try:
-        response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
-    except requests.exceptions.RequestException as e:
-        LOGGER.debug("Failed to get json from %s due to %s", url, e)
-        return None
-
-    # verify that the request was successful
-    if response.status_code != 200:
-        LOGGER.warning("Failed to get json from %s due to status code %s", url, response.status_code)
-        return None
-    return response.json()
-
-
 def get_latest_buoy_info() -> List[BuoyInfo]:
-    buoy_json = get_json(BUOYCAM_LIST_URL)
+    buoy_json = utils.get_json(BUOYCAM_LIST_URL, REQUEST_TIMEOUT_SECONDS)
     if buoy_json is None:
         LOGGER.error("Failed to get the buoy cam list from %s", BUOYCAM_LIST_URL)
         return None
     buoy_info_list = []
     for buoy in buoy_json:
         if (
-            entry_exists(buoy, "id")
-            and entry_exists(buoy, "img")
-            and entry_exists(buoy, "name")
-            and entry_exists(buoy, "lat")
-            and entry_exists(buoy, "lng")
+            utils.entry_exists(buoy, "id")
+            and utils.entry_exists(buoy, "img")
+            and utils.entry_exists(buoy, "name")
+            and utils.entry_exists(buoy, "lat")
+            and utils.entry_exists(buoy, "lng")
         ):
 
             tag = buoy["img"].split("_")[0]
@@ -359,16 +343,6 @@ def get_float(row: dict, key: str, convert_func=None) -> float:
     return convert_func(float(row[key]))
 
 
-def mps_to_kts(mps: float) -> float:
-    # Convert meters per second to knots
-    return mps * 1.94384
-
-
-def nmi_to_m(nmi: float) -> float:
-    # Convert nautical miles to meters
-    return nmi * 1852
-
-
 def table_row_to_observation(row, info: BuoyInfo) -> Observation:
     # Must have a timestamp
     if "YY" not in row or "MM" not in row or "DD" not in row or "hh" not in row or "mm" not in row:
@@ -379,9 +353,9 @@ def table_row_to_observation(row, info: BuoyInfo) -> Observation:
         description=info.description,
         lat_deg=info.position.lat_deg,
         lon_deg=info.position.lon_deg,
-        wind_speed_kts=get_float(row, "WSPD", mps_to_kts),
+        wind_speed_kts=get_float(row, "WSPD", utils.mps_to_kts),
         wind_direction_deg=get_float(row, "WDIR"),
-        gust_speed_kts=get_float(row, "GST", mps_to_kts),
+        gust_speed_kts=get_float(row, "GST", utils.mps_to_kts),
         wave_height_m=get_float(row, "WVHT"),
         dominant_wave_period_s=get_float(row, "DPD"),
         average_wave_period_s=get_float(row, "APD"),
@@ -390,7 +364,7 @@ def table_row_to_observation(row, info: BuoyInfo) -> Observation:
         air_temperature_c=get_float(row, "ATMP"),
         water_temperature_c=get_float(row, "WTMP"),
         dewpoint_temperature_c=get_float(row, "DEWP"),
-        visibility_m=get_float(row, "VIS", nmi_to_m),
+        visibility_m=get_float(row, "VIS", utils.nmi_to_m),
         pressure_tendency_hpa=get_float(row, "PTDY"),
         tide_m=get_float(row, "TIDE"),
     )
@@ -416,25 +390,6 @@ def get_observation_data(buoy_info: BuoyInfo) -> BuoyData:
     return data
 
 
-def get_image_file(url):
-    try:
-        response = requests.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
-    except requests.exceptions.RequestException as e:
-        LOGGER.warning("Failed to get image file at %s due to %s", url, e)
-        return None
-    if response.status_code != 200:
-        LOGGER.debug("Failed to get image file at %s, code: %d, reason: %s", url, response.status_code, response.reason)
-        return None
-    LOGGER.debug("Image file retrieved from %s ", url)
-    return Image.open(BytesIO(response.content))
-
-
-# the fraction of the image that is black
-def fraction_black(img):
-    img_array = np.array(img.convert("L")).flatten()
-    return np.count_nonzero(img_array == 0) / len(img_array)
-
-
 def get_angle_from_image(img: Image, ocr_reader: OCR):
     assert img.width == IMAGE_WIDTH and img.height == IMAGE_HEIGHT
     angle_crop = img.crop((150, img.height - 30, 250, img.height))
@@ -449,7 +404,7 @@ def fetch_image(request: BuoyInfo) -> Image:
         time.sleep(1 / MAX_REQUESTS_PER_SECOND)
 
     # Get the image file
-    img = get_image_file(request.image_url())
+    img = utils.get_image_file(request.image_url())
     if img is None:
         LOGGER.debug("\t%s failed", request)
         return None
@@ -530,7 +485,7 @@ def save_image(img: Image, info: BuoyInfo, output_dir: str):
     # Save the sub images
     for i, sub_img in enumerate(split_image(img)):
         # Check if the sub image is mostly black
-        fraction_black_value = fraction_black(sub_img)
+        fraction_black_value = utils.fraction_black(sub_img)
         if fraction_black_value > FRACTION_BLACK_THRESHOLD:
             LOGGER.debug(
                 "\t\tSub image %s is %.2f%% black, skipping",

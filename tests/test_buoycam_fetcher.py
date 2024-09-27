@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime, timedelta
-from buoycam_fetcher import extend_to_past, BuoyInfo, BuoyPosition
+from seesea.buoycam_fetcher import extend_to_past, BuoyInfo, BuoyPosition
 
 
 class TestExtendToPast(unittest.TestCase):
@@ -107,7 +107,7 @@ class TestExtendToPast(unittest.TestCase):
         for i, expected_date in enumerate(expected_dates):
             self.assertEqual(result[i].date, expected_date)
 
-    def test_extend_to_past_three_hours_full_minute_list(self):
+    def test_extend_to_past_three_hours_partial_minute_list(self):
         latest_list = [self.MockBuoyInfo("buoy1", datetime(2023, 10, 1, 12, 30))]
         result = extend_to_past(latest_list, 3, [0, 10])
         expected_dates = [
