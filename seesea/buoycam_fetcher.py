@@ -3,12 +3,13 @@
 import argparse
 import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 import logging
 import os
 import threading
 import time
 from typing import Dict, List
+import json
+
 import requests
 
 # import matplotlib.pyplot as plt
@@ -113,8 +114,8 @@ class BuoyData:
     A collection of observations for a buoy.
     """
 
-    def __init__(self, station_id: str):
-        self.id = station_id
+    def __init__(self, id: str):
+        self.id = id
         # key is the date string, value is the observation
         self.observations: Dict[str, Observation] = {}
 
@@ -281,7 +282,7 @@ def table_row_to_observation(row, info: BuoyInfo) -> Observation:
     if "YY" not in row or "MM" not in row or "DD" not in row or "hh" not in row or "mm" not in row:
         return None
     return Observation(
-        station_id=info.id,
+        id=info.id,
         timestamp=f'{row["YY"]}_{row["MM"]}_{row["DD"]}_{row["hh"]}{row["mm"]}',
         description=info.description,
         lat_deg=info.position.lat_deg,
@@ -395,7 +396,7 @@ def save_observation_data(observation: Observation, info: BuoyInfo, output_dir: 
 
     observation_path = os.path.join(info.save_directory(output_dir), "observation.json")
     with open(observation_path, "w", encoding="utf-8") as file:
-        file.write(observation.to_json())
+        file.write(json.dumps(observation.to_dict(), indent=4))
 
     LOGGER.debug(
         "\tObservation for buoy %s at %s saved at %s",
