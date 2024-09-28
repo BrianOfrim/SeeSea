@@ -53,16 +53,18 @@ if __name__ == "__main__":
 
     image_observations = [utils.from_dict(ImageObservation, obs) for obs in image_observations_json]
 
-    # Get all keys in the observation data that have float values
-    float_keys = [
-        key for key in Observation.__dataclass_fields__.keys() if Observation.__dataclass_fields__[key].type == float
+    # Get all keys in the observation data that have float or int values
+    number_keys = [
+        key
+        for key in Observation.__dataclass_fields__.keys()
+        if Observation.__dataclass_fields__[key].type == float or Observation.__dataclass_fields__[key].type == int
     ]
 
     # filter out keys that are degrees
-    float_keys = [key for key in float_keys if not key.endswith("_deg")]
+    # float_keys = [key for key in float_keys if not key.endswith("_deg")]
 
     # Get statistics for each float key
-    for key in float_keys:
+    for key in number_keys:
         values = [getattr(obs.observation, key) for obs in image_observations]
         # remove None values
         values = [value for value in values if value is not None]
@@ -79,6 +81,14 @@ if __name__ == "__main__":
         LOGGER.info("\tMean: %f", np.mean(values))
         LOGGER.info("\tMedian: %f", np.median(values))
         LOGGER.info("\tStandard Deviation: %f", np.std(values))
+
+        # get all unique values
+        unique_values = np.unique(values)
+        LOGGER.info("\tTotal values %d, Unique values: %d", len(values), len(unique_values))
+
+        LOGGER.info(
+            "\tUnique values (first 100): %s%s", unique_values[0:100], " ..." if len(unique_values) > 100 else ""
+        )
 
         # plot histogram
         plt.hist(values, bins="auto")

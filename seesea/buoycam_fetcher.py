@@ -265,16 +265,13 @@ def extract_table_data(url: str) -> list:
     return result
 
 
-def get_float(row: dict, key: str, convert_func=None) -> float:
+def get_float(row: dict, key: str) -> float:
     if key not in row:
         return None
     if row[key] == MISSING_DATA_INDICATOR:
         return None
 
-    if convert_func is None:
-        return float(row[key])
-
-    return convert_func(float(row[key]))
+    return float(row[key])
 
 
 def table_row_to_observation(row, info: BuoyInfo) -> Observation:
@@ -287,9 +284,9 @@ def table_row_to_observation(row, info: BuoyInfo) -> Observation:
         description=info.description,
         lat_deg=info.position.lat_deg,
         lon_deg=info.position.lon_deg,
-        wind_speed_kts=get_float(row, "WSPD", utils.mps_to_kts),
+        wind_speed_mps=get_float(row, "WSPD"),
         wind_direction_deg=get_float(row, "WDIR"),
-        gust_speed_kts=get_float(row, "GST", utils.mps_to_kts),
+        gust_speed_mps=get_float(row, "GST"),
         wave_height_m=get_float(row, "WVHT"),
         dominant_wave_period_s=get_float(row, "DPD"),
         average_wave_period_s=get_float(row, "APD"),
@@ -298,7 +295,7 @@ def table_row_to_observation(row, info: BuoyInfo) -> Observation:
         air_temperature_c=get_float(row, "ATMP"),
         water_temperature_c=get_float(row, "WTMP"),
         dewpoint_temperature_c=get_float(row, "DEWP"),
-        visibility_m=get_float(row, "VIS", utils.nmi_to_m),
+        visibility_nmi=get_float(row, "VIS"),
         pressure_tendency_hpa=get_float(row, "PTDY"),
         tide_m=get_float(row, "TIDE"),
     )
@@ -441,7 +438,7 @@ def image_pipeline(info: BuoyInfo, observation: Observation, output_dir: str, oc
         return False
 
     if ocr_reader is not None:
-        observation.bearing_of_first_image = get_angle_from_image(image, ocr_reader)
+        observation.bearing_of_first_image_deg = get_angle_from_image(image, ocr_reader)
 
     save_image(image, info, output_dir)
     save_observation_data(observation, info, output_dir)

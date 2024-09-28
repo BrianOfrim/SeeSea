@@ -69,7 +69,7 @@ def fetch_json(url, timeout=None):
 def load_json(file_path):
     """Load a json object from a file path"""
     try:
-        with open(file_path, "r") as file:
+        with open(file_path, "r", encoding="utf-8") as file:
             return json.load(file)
     except Exception as e:
         LOGGER.warning("Failed to load json from %s due to %s", file_path, e)
