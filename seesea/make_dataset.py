@@ -162,14 +162,14 @@ if __name__ == "__main__":
     validation_image_observations = image_observations[test_size : test_size + validation_size]
     training_image_observations = image_observations[test_size + validation_size :]
 
-    test_path = os.path.join(input_args.output, "test_images.json")
+    test_path = os.path.join(input_args.output, "test.json")
     write_image_observations_to_file(test_image_observations, test_path)
     LOGGER.info("Wrote %d test image observations to %s", len(test_image_observations), test_path)
 
-    validation_path = os.path.join(input_args.output, "validation_images.json")
+    validation_path = os.path.join(input_args.output, "val.json")
     write_image_observations_to_file(validation_image_observations, validation_path)
     LOGGER.info("Wrote %d validation image observations to %s", len(validation_image_observations), validation_path)
 
-    training_path = os.path.join(input_args.output, "training_images.json")
+    training_path = os.path.join(input_args.output, "train.json")
     write_image_observations_to_file(training_image_observations, training_path)
     LOGGER.info("Wrote %d training image observations to %s", len(training_image_observations), training_path)

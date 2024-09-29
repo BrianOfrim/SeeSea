@@ -3,3 +3,6 @@ pillow
 numpy
 matplotlib
 easyocr
+torch
+torchvision
+pandas
