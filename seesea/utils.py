@@ -7,11 +7,14 @@ import os
 import re
 import json
 from io import BytesIO
-from typing import Type, Any
+from typing import Type, Any, Tuple, Callable
 
 import requests
 import numpy as np
 from PIL import Image
+import torch.nn as nn
+import torch
+import torchvision.models as models
 
 LOGGER = logging.getLogger(__name__)
 
@@ -146,3 +149,47 @@ def from_dict(dataclass_type: Type[Any], data: dict) -> Any:
 
     # Return an instance of the dataclass, passing the processed dictionary
     return dataclass_type(**data)
+
+
+def continuous_single_output_model_factory(model_name: str, weights_path: str = None) -> Tuple[nn.Module, Callable]:
+    """
+    Create a model with one continuous output from the model name and weights path
+
+    Args:
+        model_name: The name of the model to create
+        weights_path: The path to the weights file to load into the model. If None, the default weights are used
+
+    Returns:
+        The model and an image transform function
+    """
+    model_builder = models.get_model_builder(model_name)
+
+    weight_enum = models.get_model_weights(model_builder)
+    default_weights = weight_enum.DEFAULT
+    transform = default_weights.transforms()
+    model = model_builder(weights=default_weights)
+
+    # Modify the fully connected layer to output a single value
+    # For ResNet models, the fully connected layer is model.fc
+    # For convnext models, the fully connected layer is model.classifier[2]
+    if model_name.startswith("resnet"):
+        model.fc = nn.Linear(in_features=model.fc.in_features, out_features=1)
+    elif model_name.startswith("convnext"):
+        model.classifier[2] = nn.Linear(in_features=model.classifier[2].in_features, out_features=1)
+    else:
+        raise ValueError(f"Model {model_name} not supported")
+
+    LOGGER.info("Using model %s", model_name)
+
+    if weights_path is not None:
+        # verify that the weights file exists
+        if not os.path.exists(weights_path):
+            raise ValueError(f"Model weights file {weights_path} does not exist")
+        model.load_state_dict(torch.load(weights_path, weights_only=True))
+        LOGGER.debug("Loaded weights from %s", weights_path)
+    else:
+        LOGGER.debug("Using default weights %s", default_weights)
+
+    LOGGER.debug("Using image transforms: %s", transform)
+
+    return model, transform
