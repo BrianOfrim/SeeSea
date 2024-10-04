@@ -3,8 +3,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 import numpy as np
 
-from seesea import utils
-from seesea.observation import ImageObservation
+from seesea.observation import load_image_observations
 
 
 class SeeSeaDataset(Dataset):
@@ -16,15 +15,9 @@ class SeeSeaDataset(Dataset):
             image_observation_file (string): Path to the JSON file with image filenames and observation data.
             transform (callable, optional): Optional transforms to be applied to the images.
         """
-        image_observations_json = utils.load_json(image_observation_file)
-        if image_observations_json is None:
-            # throw an exception if the json file is not loaded
-            raise Exception(f"Failed to load image observation data from {image_observation_file}")
-        if len(image_observations_json) == 0:
-            # throw an exception if the json file is empty
-            raise Exception(f"No image observation data found in {image_observation_file}")
 
-        self.image_observations = [utils.from_dict(ImageObservation, obs) for obs in image_observations_json]
+        self.image_observations = load_image_observations(image_observation_file)
+
         self.observation_key = observation_key
         self.transform = transform
         self.max_length = max_length

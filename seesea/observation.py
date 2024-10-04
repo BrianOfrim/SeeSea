@@ -1,5 +1,8 @@
 import json
 from dataclasses import dataclass, asdict
+from typing import List
+
+from seesea import utils
 
 
 @dataclass
@@ -58,3 +61,11 @@ class ImageObservation:
     def to_dict(self):
         """Convert the image observation to a dictionary"""
         return asdict(self)
+
+
+def load_image_observations(filepath: str) -> List[ImageObservation]:
+    """Load ImageObservations from file"""
+    obs_json = utils.load_json(filepath)
+    if obs_json is None:
+        raise IOError(f"Failed to load image observation data from {filepath}")
+    return [utils.from_dict(ImageObservation, obs) for obs in obs_json]

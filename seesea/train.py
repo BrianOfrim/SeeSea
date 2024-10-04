@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import transforms, models
+from torch.optim.lr_scheduler import OneCycleLR
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -21,6 +22,8 @@ from seesea.observation import Observation, ImageObservation
 from seesea.seesea_dataset import SeeSeaDataset
 
 LOGGER = logging.getLogger(__name__)
+
+g_learning_rates = []
 
 
 @dataclass
@@ -40,7 +43,7 @@ class TrainingDetails:
         return asdict(self)
 
 
-def train_one_epoch(model, criterion, optimizer, loader, device):
+def train_one_epoch(model, criterion, optimizer, loader, device, scheduler=None):
     """Train the model for one epoch"""
     model.train()
     running_loss = 0.0
@@ -63,6 +66,10 @@ def train_one_epoch(model, criterion, optimizer, loader, device):
         # Backward pass and optimization
         loss.backward()
         optimizer.step()
+
+        if scheduler is not None:
+            scheduler.step()
+            g_learning_rates.append(scheduler.get_last_lr())
 
         running_loss += loss.item() * inputs.size(0)
         input_processed += inputs.size(0)
@@ -121,6 +128,7 @@ def main(args):
     # Loss Function and Optimizer
     criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
+    scheduler = None  # OneCycleLR(optimizer, max_lr=0.001, steps_per_epoch=len(train_loader), epochs=args.epochs)
 
     training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
@@ -131,7 +139,7 @@ def main(args):
 
         LOGGER.debug("Starting epoch %d/%d", epoch + 1, args.epochs)
         # Training Phase
-        epoch_loss = train_one_epoch(model, criterion, optimizer, train_loader, device)
+        epoch_loss = train_one_epoch(model, criterion, optimizer, train_loader, device, scheduler)
         train_losses.append(epoch_loss)
         LOGGER.info("Epoch %d/%d, Training Loss: %.4f", epoch + 1, args.epochs, epoch_loss)
 
@@ -179,6 +187,16 @@ def main(args):
         json.dump(training_details.to_dict(), f, indent=4)
 
     LOGGER.info("Output saved to %s", model_dir)
+
+    # start a new figure
+    plt.figure()
+
+    # Plot the learning rates
+    plt.plot(g_learning_rates)
+    plt.xlabel("Batch")
+    plt.ylabel("Learning Rate")
+    plt.title("Learning Rate Schedule")
+    plt.savefig(os.path.join(model_dir, "learning_rate_plot.png"))
 
 
 def get_args_parser():

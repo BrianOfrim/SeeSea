@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 import seesea.utils as utils
-from seesea.observation import ImageObservation
+from seesea.observation import ImageObservation, load_image_observations
 
 from seesea.train import TrainingDetails
 from seesea.seesea_dataset import SeeSeaDataset
@@ -52,12 +52,7 @@ def main(args):
 
     model, transform = utils.continuous_single_output_model_factory(training_details.model, model_weights_path)
 
-    dataset = SeeSeaDataset(
-        args.input,
-        observation_key=training_details.output_name,
-        transform=transform,
-        max_length=args.num_samples,
-    )
+    image_observations = load_image_observations(args.input)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -68,31 +63,75 @@ def main(args):
 
     model = model.to(device)
 
-    criterion = nn.MSELoss()
-
     # Run inference on the dataset
     model.eval()
 
     LOGGER.info("Running inference on the dataset to classify %s", training_details.output_name)
 
+    # shuffle the data
+    np.random.shuffle(image_observations)
+    num_to_display = min(len(image_observations), args.num_samples)
+
     with torch.no_grad():
-        for idx in range(max(len(dataset), args.num_samples)):
-            image, value = dataset[idx]
-            np_image = image.numpy().transpose((1, 2, 0))
+        for idx in range(num_to_display):
 
-            image = image.unsqueeze(0).to(device)
-            value = value.unsqueeze(0).to(device)
+            image_observation = image_observations[idx]
+            observation = image_observation.observation
 
-            output = model(image)
-            output = output.view(-1)
+            label = getattr(observation, training_details.output_name, None)
+            if label is None:
+                LOGGER.error(
+                    "Observation %s:%s does not have a valid value for %s",
+                    observation.id,
+                    observation.timestamp,
+                    observation.output_name,
+                )
+                continue
 
-            loss = criterion(output, value.view(-1))
-            LOGGER.info("Loss: %f", loss.item())
-            LOGGER.info("Expected: %f, Predicted: %f", value.item(), output.item())
+            # original image as it is in the dataset
+            original_image = utils.load_image(image_observation.image_path)
 
-            # Plot the image and the prediction
-            plt.imshow(np_image)
-            plt.title(f"Expected: {value.item()}, Predicted: {output.item()}")
+            # trainsform the image to the model input
+            transformed_image = transform(original_image)
+
+            input_image = transformed_image.unsqueeze(0).to(device)
+
+            label = np.array([label]).astype("float32")
+            label = torch.from_numpy(label)
+            label = label.to(device)
+
+            output = model(input_image)
+
+            LOGGER.info(
+                "Predicted: %f, Expected: %f, Diff: %f", output.item(), label.item(), output.item() - label.item()
+            )
+
+            # Show the orignial image, the transformed image and the expected and predicted values
+            plt.figure()
+            # plt.subplot(1, 2, 1)
+            plt.imshow(original_image)
+            plt.title("Original Image")
+            plt.axis("off")
+
+            # plt.subplot(1, 2, 2)
+            # convert the image to the correct format for display
+            # transformed_image = transformed_image.permute(1, 2, 0)
+
+            # # normalize the pixel values from -2 to 2 to 0 to 1
+            # transformed_image = (transformed_image + 2) / 4
+
+            # get original image brightness
+            brightness = utils.get_brightness(original_image)
+
+            # plt.imshow(transformed_image)
+            # plt.title("Transformed Image")
+            # plt.axis("off")
+
+            plt.suptitle(
+                f"Expected: {label.item():.3f}, Predicted: {output.item():.3f}, Diff:"
+                f" {output.item() - label.item():.3f}, Brightness: {brightness:.2f}"
+            )
+
             plt.show()
 
 
@@ -104,7 +143,7 @@ def get_args_parser():
     parser.add_argument("--model-dir", help="Path to the directory containing the trained model.")
     parser.add_argument("--log", type=str, help="Log level", default="INFO")
     parser.add_argument("--log-file", type=str, help="Log file", default=None)
-    parser.add_argument("--num-samples", type=int, help="Number of samples to run inference on", default=10)
+    parser.add_argument("--num-samples", type=int, help="Number of samples to run inference on", default=None)
 
     return parser
 
