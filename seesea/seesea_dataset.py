@@ -3,7 +3,7 @@ from torch.utils.data import Dataset
 from PIL import Image
 import numpy as np
 
-from seesea.observation import load_image_observations
+from seesea.observation import from_huggingface_dataset
 
 
 class SeeSeaDataset(Dataset):
@@ -16,7 +16,7 @@ class SeeSeaDataset(Dataset):
             transform (callable, optional): Optional transforms to be applied to the images.
         """
 
-        self.image_observations = load_image_observations(image_observation_file)
+        self.image_observations = from_huggingface_dataset(image_observation_file)
 
         self.observation_key = observation_key
         self.transform = transform

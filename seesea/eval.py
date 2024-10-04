@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 import seesea.utils as utils
-from seesea.observation import ImageObservation, load_image_observations
+from seesea.observation import ImageObservation, from_huggingface_dataset
 
 from seesea.train import TrainingDetails
 from seesea.seesea_dataset import SeeSeaDataset
@@ -52,7 +52,7 @@ def main(args):
 
     model, transform = utils.continuous_single_output_model_factory(training_details.model, model_weights_path)
 
-    image_observations = load_image_observations(args.input)
+    image_observations = from_huggingface_dataset(args.input)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")

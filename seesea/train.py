@@ -105,8 +105,8 @@ def main(args):
     if not os.path.exists(args.output):
         os.makedirs(args.output)
 
-    train_file = os.path.join(args.input, "train.json")
-    val_file = os.path.join(args.input, "val.json")
+    train_file = os.path.join(args.input, "train.jsonl")
+    val_file = os.path.join(args.input, "val.jsonl")
 
     model, transform = utils.continuous_single_output_model_factory(args.model)
 

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import seesea.utils as utils
-from seesea.observation import ImageObservation, Observation
+from seesea.observation import ImageObservation, Observation, from_huggingface_dataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -17,7 +17,7 @@ if __name__ == "__main__":
 
     arg_parser = argparse.ArgumentParser(description="Visualize statistics about the dataset")
     arg_parser.add_argument("--input", help="The json file containing the dataset image observation information")
-    arg_parser.add_argument("--output", help="The directory to write the output files to", default="data/stats")
+    arg_parser.add_argument("--output", help="The directory to write the output files to", default="stats")
     arg_parser.add_argument("--log", type=str, help="Log level", default="INFO")
     arg_parser.add_argument("--log-file", type=str, help="Log file", default=None)
     input_args = arg_parser.parse_args()
@@ -42,16 +42,11 @@ if __name__ == "__main__":
     # get the observations from the image observation json file
     LOGGER.info("Getting image observation data from %s", input_args.input)
 
-    image_observations_json = utils.load_json(input_args.input)
-    if image_observations_json is None:
-        LOGGER.error("Failed to load image observation data from %s", input_args.input)
-        exit(1)
+    image_observations = from_huggingface_dataset(input_args.input)
 
-    if len(image_observations_json) == 0:
+    if len(image_observations) == 0:
         LOGGER.error("No image observation data found in %s", input_args.input)
         exit(1)
-
-    image_observations = [utils.from_dict(ImageObservation, obs) for obs in image_observations_json]
 
     # Get all keys in the observation data that have float or int values
     number_keys = [

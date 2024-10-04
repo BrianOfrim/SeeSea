@@ -1,4 +1,5 @@
 import json
+import os
 from dataclasses import dataclass, asdict
 from typing import List
 
@@ -63,9 +64,36 @@ class ImageObservation:
         return asdict(self)
 
 
-def load_image_observations(filepath: str) -> List[ImageObservation]:
-    """Load ImageObservations from file"""
-    obs_json = utils.load_json(filepath)
-    if obs_json is None:
-        raise IOError(f"Failed to load image observation data from {filepath}")
-    return [utils.from_dict(ImageObservation, obs) for obs in obs_json]
+def to_huggingface_dataset(image_observations: List[ImageObservation], output_file: str):
+    """Convert the image observations to a format that can be used by Hugging Face datasets. Output is jsonl format."""
+
+    # must convert the image paths to be relative to the output file
+    data = [
+        {"file_path": os.path.relpath(io.image_path, os.path.dirname(output_file)), **io.observation.to_dict()}
+        for io in image_observations
+    ]
+
+    # write the data to the output file
+    with open(output_file, "w", encoding="utf-8") as f:
+        for d in data:
+            f.write(json.dumps(d) + "\n")
+
+
+def from_huggingface_dataset(filepath: str) -> List[ImageObservation]:
+    """Load ImageObservations from a Hugging Face dataset file"""
+    with open(filepath, "r", encoding="utf-8") as f:
+        data = [json.loads(line) for line in f]
+
+    # convert the file paths to be absolute
+
+    img_obs = []
+    for d in data:
+        abs_path = os.path.join(os.path.dirname(filepath), d["file_path"])
+        # exclude the file_path key
+        d.pop("file_path")
+
+        obs = utils.from_dict(Observation, d)
+
+        img_obs.append(ImageObservation(abs_path, obs))
+
+    return img_obs

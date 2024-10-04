@@ -11,7 +11,7 @@ import json
 import numpy as np
 
 import seesea.utils as utils
-from seesea.observation import Observation, ImageObservation
+from seesea.observation import Observation, ImageObservation, to_huggingface_dataset
 
 
 LOGGER = logging.getLogger(__name__)
@@ -80,11 +80,6 @@ def filter_by_brightness(image_observations: List[ImageObservation], min: float,
             filtered.append(image_observation)
 
     return filtered
-
-
-def write_image_observations_to_file(image_observations: List[ImageObservation], file_path: str):
-    with open(file_path, "w") as file:
-        file.write(json.dumps([io.to_dict() for io in image_observations], indent=4))
 
 
 if __name__ == "__main__":
@@ -160,16 +155,16 @@ if __name__ == "__main__":
 
     test_image_observations = image_observations[:test_size]
     validation_image_observations = image_observations[test_size : test_size + validation_size]
-    training_image_observations = image_observations[test_size + validation_size :]
+    training_image_observaitons = image_observations[test_size + validation_size :]
 
-    test_path = os.path.join(input_args.output, "test.json")
-    write_image_observations_to_file(test_image_observations, test_path)
+    test_path = os.path.join(input_args.output, "test.jsonl")
+    to_huggingface_dataset(test_image_observations, test_path)
     LOGGER.info("Wrote %d test image observations to %s", len(test_image_observations), test_path)
 
-    validation_path = os.path.join(input_args.output, "val.json")
-    write_image_observations_to_file(validation_image_observations, validation_path)
+    validation_path = os.path.join(input_args.output, "val.jsonl")
+    to_huggingface_dataset(validation_image_observations, validation_path)
     LOGGER.info("Wrote %d validation image observations to %s", len(validation_image_observations), validation_path)
 
-    training_path = os.path.join(input_args.output, "train.json")
-    write_image_observations_to_file(training_image_observations, training_path)
-    LOGGER.info("Wrote %d training image observations to %s", len(training_image_observations), training_path)
+    training_path = os.path.join(input_args.output, "train.jsonl")
+    to_huggingface_dataset(training_image_observaitons, training_path)
+    LOGGER.info("Wrote %d training image observations to %s", len(training_image_observaitons), training_path)

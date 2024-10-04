@@ -172,7 +172,7 @@ def continuous_single_output_model_factory(model_name: str, weights_path: str = 
     # Modify the fully connected layer to output a single value
     # For ResNet models, the fully connected layer is model.fc
     # For convnext models, the fully connected layer is model.classifier[2]
-    if model_name.startswith("resnet"):
+    if model_name.startswith("resnet") or model_name.startswith("wide_resnet") or model_name.startswith("regnet"):
         model.fc = nn.Linear(in_features=model.fc.in_features, out_features=1)
     elif model_name.startswith("convnext"):
         model.classifier[2] = nn.Linear(in_features=model.classifier[2].in_features, out_features=1)
