@@ -69,7 +69,7 @@ def to_huggingface_dataset(image_observations: List[ImageObservation], output_fi
 
     # must convert the image paths to be relative to the output file
     data = [
-        {"file_path": os.path.relpath(io.image_path, os.path.dirname(output_file)), **io.observation.to_dict()}
+        {"file_name": os.path.relpath(io.image_path, os.path.dirname(output_file)), **io.observation.to_dict()}
         for io in image_observations
     ]
 
@@ -88,9 +88,9 @@ def from_huggingface_dataset(filepath: str) -> List[ImageObservation]:
 
     img_obs = []
     for d in data:
-        abs_path = os.path.join(os.path.dirname(filepath), d["file_path"])
-        # exclude the file_path key
-        d.pop("file_path")
+        abs_path = os.path.join(os.path.dirname(filepath), d["file_name"])
+        # exclude the file_name key
+        d.pop("file_name")
 
         obs = utils.from_dict(Observation, d)
 

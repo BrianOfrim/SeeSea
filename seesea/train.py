@@ -23,8 +23,6 @@ from seesea.seesea_dataset import SeeSeaDataset
 
 LOGGER = logging.getLogger(__name__)
 
-g_learning_rates = []
-
 
 @dataclass
 class TrainingDetails:
@@ -69,7 +67,6 @@ def train_one_epoch(model, criterion, optimizer, loader, device, scheduler=None)
 
         if scheduler is not None:
             scheduler.step()
-            g_learning_rates.append(scheduler.get_last_lr())
 
         running_loss += loss.item() * inputs.size(0)
         input_processed += inputs.size(0)
@@ -128,7 +125,8 @@ def main(args):
     # Loss Function and Optimizer
     criterion = nn.MSELoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
-    scheduler = None  # OneCycleLR(optimizer, max_lr=0.001, steps_per_epoch=len(train_loader), epochs=args.epochs)
+    # step scheduler
+    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=6, gamma=0.1)
 
     training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
@@ -139,9 +137,11 @@ def main(args):
 
         LOGGER.debug("Starting epoch %d/%d", epoch + 1, args.epochs)
         # Training Phase
-        epoch_loss = train_one_epoch(model, criterion, optimizer, train_loader, device, scheduler)
+        epoch_loss = train_one_epoch(model, criterion, optimizer, train_loader, device, None)
         train_losses.append(epoch_loss)
         LOGGER.info("Epoch %d/%d, Training Loss: %.4f", epoch + 1, args.epochs, epoch_loss)
+
+        # scheduler.step()
 
         # Validation Phase
         val_epoch_loss = evaluate_model(model, criterion, val_loader, device)
@@ -192,7 +192,6 @@ def main(args):
     plt.figure()
 
     # Plot the learning rates
-    plt.plot(g_learning_rates)
     plt.xlabel("Batch")
     plt.ylabel("Learning Rate")
     plt.title("Learning Rate Schedule")
