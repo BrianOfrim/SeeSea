@@ -4,6 +4,7 @@ from dataclasses import dataclass, asdict
 from typing import List
 
 from seesea import utils
+import webdataset as wds
 
 
 @dataclass
@@ -59,41 +60,24 @@ class ImageObservation:
     image_path: str
     observation: Observation
 
-    def to_dict(self):
-        """Convert the image observation to a dictionary"""
-        return asdict(self)
+    def base_filename(self):
+        # return the base filename of the image
+        return os.path.splitext(os.path.basename(self.image_path))[0]
 
 
-def to_huggingface_dataset(image_observations: List[ImageObservation], output_file: str):
-    """Convert the image observations to a format that can be used by Hugging Face datasets. Output is jsonl format."""
+def to_webdataset(image_observations: List[ImageObservation], output_dir: str):
 
-    # must convert the image paths to be relative to the output file
-    data = [
-        {"file_name": os.path.relpath(io.image_path, os.path.dirname(output_file)), **io.observation.to_dict()}
-        for io in image_observations
-    ]
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
 
-    # write the data to the output file
-    with open(output_file, "w", encoding="utf-8") as f:
-        for d in data:
-            f.write(json.dumps(d) + "\n")
-
-
-def from_huggingface_dataset(filepath: str) -> List[ImageObservation]:
-    """Load ImageObservations from a Hugging Face dataset file"""
-    with open(filepath, "r", encoding="utf-8") as f:
-        data = [json.loads(line) for line in f]
-
-    # convert the file paths to be absolute
-
-    img_obs = []
-    for d in data:
-        abs_path = os.path.join(os.path.dirname(filepath), d["file_name"])
-        # exclude the file_name key
-        d.pop("file_name")
-
-        obs = utils.from_dict(Observation, d)
-
-        img_obs.append(ImageObservation(abs_path, obs))
-
-    return img_obs
+    # write a webdataset recipe file
+    with wds.ShardWriter(os.path.join(output_dir, "%06d.tar"), maxsize=1e9) as sink:
+        for io in image_observations:
+            image = utils.load_image(io.image_path)
+            sink.write(
+                {
+                    "__key__": io.base_filename(),
+                    "jpg": image,
+                    "json": io.observation.to_dict(),
+                }
+            )

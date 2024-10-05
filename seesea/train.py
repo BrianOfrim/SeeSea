@@ -18,7 +18,6 @@ from PIL import Image
 from tqdm import tqdm
 
 import seesea.utils as utils
-from seesea.observation import Observation, ImageObservation
 from seesea.seesea_dataset import SeeSeaDataset
 
 LOGGER = logging.getLogger(__name__)

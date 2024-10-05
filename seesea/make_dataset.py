@@ -6,12 +6,10 @@ import os
 import logging
 import re
 from typing import List, Tuple
-import json
 
 import numpy as np
-
 import seesea.utils as utils
-from seesea.observation import Observation, ImageObservation, to_huggingface_dataset
+from seesea.observation import Observation, ImageObservation, to_webdataset
 
 
 LOGGER = logging.getLogger(__name__)
@@ -21,16 +19,16 @@ def get_all_image_observations(input_dir: str) -> List[ImageObservation]:
     observation_file_paths = utils.get_all_files(input_dir, re.compile(r"observation.json", re.IGNORECASE))
     image_observations: List[ImageObservation] = []
 
-    for obs in observation_file_paths:
+    for obs_path in observation_file_paths:
 
         # Load the observation from the file
-        observation_json = utils.load_json(obs)
+        observation_json = utils.load_json(obs_path)
         if observation_json is None:
             continue
 
         observation = Observation(**observation_json)
-        image_paths = utils.get_all_files(os.path.dirname(obs), re.compile(r"\d+.jpg", re.IGNORECASE))
-        image_observations.extend([ImageObservation(path, observation) for path in image_paths])
+        image_paths = utils.get_all_files(os.path.dirname(obs_path), re.compile(r"\d+.jpg", re.IGNORECASE))
+        image_observations.extend([ImageObservation(image_path, observation) for image_path in image_paths])
 
     return image_observations
 
@@ -45,7 +43,7 @@ def filter_by_observation_keys(
     return filtered_image_observations
 
 
-def calculate_image_brightnessses(image_observations: List[ImageObservation]) -> List[Tuple[ImageObservation, float]]:
+def calculate_image_brightnesses(image_observations: List[ImageObservation]) -> List[Tuple[ImageObservation, float]]:
     image_brighnesses: List[(ImageObservation, float)] = []
 
     for i, image_observation in enumerate(image_observations):
@@ -62,7 +60,7 @@ def calculate_image_brightnessses(image_observations: List[ImageObservation]) ->
 
 
 def filter_by_brightness(image_observations: List[ImageObservation], min: float, max: float) -> List[ImageObservation]:
-    image_brighnesses = calculate_image_brightnessses(image_observations)
+    image_brighnesses = calculate_image_brightnesses(image_observations)
 
     # Print how many images were less than the min and how many were greater than the max
     if min is not None:
@@ -157,14 +155,14 @@ if __name__ == "__main__":
     validation_image_observations = image_observations[test_size : test_size + validation_size]
     training_image_observaitons = image_observations[test_size + validation_size :]
 
-    test_path = os.path.join(input_args.output, "test.jsonl")
-    to_huggingface_dataset(test_image_observations, test_path)
+    test_path = os.path.join(input_args.output, "test")
+    to_webdataset(test_image_observations, test_path)
     LOGGER.info("Wrote %d test image observations to %s", len(test_image_observations), test_path)
 
-    validation_path = os.path.join(input_args.output, "val.jsonl")
-    to_huggingface_dataset(validation_image_observations, validation_path)
+    validation_path = os.path.join(input_args.output, "val")
+    to_webdataset(validation_image_observations, validation_path)
     LOGGER.info("Wrote %d validation image observations to %s", len(validation_image_observations), validation_path)
 
-    training_path = os.path.join(input_args.output, "train.jsonl")
-    to_huggingface_dataset(training_image_observaitons, training_path)
+    training_path = os.path.join(input_args.output, "train")
+    to_webdataset(training_image_observaitons, training_path)
     LOGGER.info("Wrote %d training image observations to %s", len(training_image_observaitons), training_path)
