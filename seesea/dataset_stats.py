@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import seesea.utils as utils
-from seesea.observation import ImageObservation, Observation, from_huggingface_dataset
+from seesea.observation import Observation, from_huggingface_dataset
 
 LOGGER = logging.getLogger(__name__)
 

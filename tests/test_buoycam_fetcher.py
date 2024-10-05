@@ -6,15 +6,15 @@ from seesea.buoycam_fetcher import extend_to_past, BuoyInfo, BuoyPosition
 class TestExtendToPast(unittest.TestCase):
 
     class MockBuoyInfo:
-        def __init__(self, id, date):
-            self.id = id
+        def __init__(self, station_id, date):
+            self.station_id = station_id
             self.date = date
             self.tag = "tag"
             self.description = "description"
             self.position = BuoyPosition(1.0, 2.0)
 
         def save_directory(self, output_dir):
-            return f"{output_dir}/{self.id}"
+            return f"{output_dir}/{self.station_id}"
 
         def image_full_path(self, output_dir, suffix):
             return f"{self.save_directory(output_dir)}/{suffix}.jpg"

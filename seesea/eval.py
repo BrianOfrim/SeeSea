@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 import seesea.utils as utils
-from seesea.observation import ImageObservation, from_huggingface_dataset
+from seesea.observation import from_huggingface_dataset
 
 from seesea.train import TrainingDetails
 from seesea.seesea_dataset import SeeSeaDataset
@@ -82,7 +82,7 @@ def main(args):
             if label is None:
                 LOGGER.error(
                     "Observation %s:%s does not have a valid value for %s",
-                    observation.id,
+                    observation.station_id,
                     observation.timestamp,
                     observation.output_name,
                 )

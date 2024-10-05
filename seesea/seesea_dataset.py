@@ -39,7 +39,7 @@ class SeeSeaDataset(Dataset):
         value = getattr(observation, self.observation_key, None)
         if value is None:
             raise ValueError(
-                f"Observation {observation.id}:{observation.timestamp} does not have a valid value for"
+                f"Observation {observation.station_id}:{observation.timestamp} does not have a valid value for"
                 f" {self.observation_key}"
             )
 

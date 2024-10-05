@@ -13,7 +13,7 @@ class Observation:
     Observation data for a buoy at a specific time.
     """
 
-    id: str
+    station_id: str
     timestamp: str
     description: str
     lat_deg: float
@@ -36,10 +36,10 @@ class Observation:
 
     def __str__(self):
         return (
-            f"Observation(id={self.id} timestamp={self.timestamp}, description={self.description}, lat={self.lat_deg},"
-            f" lon={self.lon_deg},wind_speed_mps={self.wind_speed_mps}, wind_direction_deg={self.wind_direction_deg},"
-            f" gust_speed_mps={self.gust_speed_mps}, wave_height_m={self.wave_height_m},"
-            f" dominant_wave_period_s={self.dominant_wave_period_s},"
+            f"Observation(station_id={self.station_id} timestamp={self.timestamp}, description={self.description},"
+            f" lat={self.lat_deg}, lon={self.lon_deg},wind_speed_mps={self.wind_speed_mps},"
+            f" wind_direction_deg={self.wind_direction_deg}, gust_speed_mps={self.gust_speed_mps},"
+            f" wave_height_m={self.wave_height_m}, dominant_wave_period_s={self.dominant_wave_period_s},"
             f" average_wave_period_s={self.average_wave_period_s},"
             f" mean_wave_direction_deg={self.mean_wave_direction_deg},"
             f" atmospheric_pressure_hpa={self.atmospheric_pressure_hpa}, air_temperature_c={self.air_temperature_c},"

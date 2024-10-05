@@ -76,7 +76,7 @@ class BuoyInfo:
         position: BuoyPosition,
         date: datetime.datetime,
     ):
-        self.id = identifier
+        self.station_id = identifier
         self.tag = tag
         self.description = description
         self.position = position
@@ -84,8 +84,8 @@ class BuoyInfo:
 
     def __str__(self):
         return (
-            f"BuoyInfo(id={self.id}, tag={self.tag}, description={self.description}, position={self.position},"
-            f" date={self.date})"
+            f"BuoyInfo(station_id={self.station_id}, tag={self.tag}, description={self.description},"
+            f" position={self.position}, date={self.date})"
         )
 
     def date_string(self):
@@ -98,10 +98,10 @@ class BuoyInfo:
         return f"{BUOYCAM_IMAGE_FILE_URL_BASE}/{self.image_name()}.jpg"
 
     def observation_url(self):
-        return f"{OBSERVATION_URL}/{self.id}.txt"
+        return f"{OBSERVATION_URL}/{self.station_id}.txt"
 
     def save_directory(self, root_dir: str = "images"):
-        return os.path.join(root_dir, self.id, self.date_string())
+        return os.path.join(root_dir, self.station_id, self.date_string())
 
     def image_full_path(self, root_dir: str = "images", image_suffix: str = None):
         return os.path.join(
@@ -114,8 +114,8 @@ class BuoyData:
     A collection of observations for a buoy.
     """
 
-    def __init__(self, id: str):
-        self.id = id
+    def __init__(self, station_id: str):
+        self.station_id = station_id
         # key is the date string, value is the observation
         self.observations: Dict[str, Observation] = {}
 
@@ -279,7 +279,7 @@ def table_row_to_observation(row, info: BuoyInfo) -> Observation:
     if "YY" not in row or "MM" not in row or "DD" not in row or "hh" not in row or "mm" not in row:
         return None
     return Observation(
-        id=info.id,
+        station_id=info.station_id,
         timestamp=f'{row["YY"]}_{row["MM"]}_{row["DD"]}_{row["hh"]}{row["mm"]}',
         description=info.description,
         lat_deg=info.position.lat_deg,
@@ -309,15 +309,15 @@ def get_observation_data(buoy_info: BuoyInfo) -> BuoyData:
 
     observation_data = extract_table_data(buoy_info.observation_url())
     if observation_data is None:
-        LOGGER.warning("Failed to get buoy data for buoy %s", buoy_info.id)
+        LOGGER.warning("Failed to get buoy data for buoy %s", buoy_info.station_id)
         return None
-    data = BuoyData(buoy_info.id)
+    data = BuoyData(buoy_info.station_id)
     for row in observation_data:
         observation = table_row_to_observation(row, buoy_info)
         if observation is not None:
             data.add_observation(observation)
         else:
-            LOGGER.warning("Failed to parse observation data for buoy %s", buoy_info.id)
+            LOGGER.warning("Failed to parse observation data for buoy %s", buoy_info.station_id)
     return data
 
 
@@ -349,7 +349,7 @@ def fetch_image(request: BuoyInfo) -> Image:
 
 
 def change_date(info: BuoyInfo, new_date: datetime.datetime) -> BuoyInfo:
-    return BuoyInfo(info.id, info.tag, info.description, info.position, new_date)
+    return BuoyInfo(info.station_id, info.tag, info.description, info.position, new_date)
 
 
 def extend_to_past(latest_list: List[BuoyInfo], hours_in_past: int, minute_list: List[int]) -> list[BuoyInfo]:
@@ -397,7 +397,7 @@ def save_observation_data(observation: Observation, info: BuoyInfo, output_dir: 
 
     LOGGER.debug(
         "\tObservation for buoy %s at %s saved at %s",
-        info.id,
+        info.station_id,
         info.date_string(),
         observation_path,
     )
@@ -488,11 +488,11 @@ def main(args):
             buoy = futures_to_input[future]
             LOGGER.info(
                 "Completed observation request for %s, success: %s",
-                buoy.id,
+                buoy.station_id,
                 result is not None,
             )
             if result is not None:
-                buoy_data_lookup[result.id] = result
+                buoy_data_lookup[result.station_id] = result
 
     LOGGER.info("Retrieved observation data for %s buoycams", len(buoy_data_lookup))
 
@@ -509,15 +509,15 @@ def main(args):
     # Only request images that we have observation data for and that we haven't already fetched
     filtered_requests = []
     for ir in image_requests:
-        if ir.id not in buoy_data_lookup:
-            LOGGER.warning("Buoy %s does not have observation data", ir.id)
+        if ir.station_id not in buoy_data_lookup:
+            LOGGER.warning("Buoy %s does not have observation data", ir.station_id)
             continue
-        if not buoy_data_lookup[ir.id].has_observation(ir.date_string()):
-            LOGGER.warning("Buoy %s does not have observation data for %s", ir.id, ir.date_string())
+        if not buoy_data_lookup[ir.station_id].has_observation(ir.date_string()):
+            LOGGER.warning("Buoy %s does not have observation data for %s", ir.station_id, ir.date_string())
             continue
 
         if already_fetched(ir, args.output):
-            LOGGER.debug("Buoy %s at %s already fetched", ir.id, ir.date_string())
+            LOGGER.debug("Buoy %s at %s already fetched", ir.station_id, ir.date_string())
             continue
 
         filtered_requests.append(ir)
@@ -532,7 +532,7 @@ def main(args):
 
         futures_to_request = {}
         for request in filtered_requests:
-            obs = buoy_data_lookup[request.id].get_observation(request.date_string())
+            obs = buoy_data_lookup[request.station_id].get_observation(request.date_string())
             future = executor.submit(image_pipeline, request, obs, args.output, ocr_reader)
             futures_to_request[future] = request
 
