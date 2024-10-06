@@ -6,19 +6,23 @@ import datetime
 import json
 from dataclasses import dataclass, asdict
 from typing import List, Tuple, Callable
+from functools import partial
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from torchvision import transforms, models
 from torch.optim.lr_scheduler import OneCycleLR
+from datasets import load_dataset, Image
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
 from tqdm import tqdm
 
+
 import seesea.utils as utils
-from seesea.seesea_dataset import SeeSeaDataset
+
+# from seesea.seesea_dataset import SeeSeaDataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,8 +48,8 @@ def train_one_epoch(model, criterion, optimizer, loader, device, scheduler=None)
     """Train the model for one epoch"""
     model.train()
     running_loss = 0.0
+    inputs_processed = 0
 
-    input_processed = 0
     for inputs, label in tqdm(loader, leave=False, desc="Training", disable=LOGGER.level > logging.INFO):
         # pring the percentage of the dataset that has been processed
 
@@ -68,17 +72,16 @@ def train_one_epoch(model, criterion, optimizer, loader, device, scheduler=None)
             scheduler.step()
 
         running_loss += loss.item() * inputs.size(0)
-        input_processed += inputs.size(0)
+        inputs_processed += inputs.size(0)
 
-    assert input_processed == len(loader.dataset)
-
-    return running_loss / len(loader.dataset)
+    return running_loss / inputs_processed
 
 
 def evaluate_model(model, criterion, loader, device):
     """Evaluate the model"""
     model.eval()
     running_loss = 0.0
+    inputs_processed = 0
 
     with torch.no_grad():
         for inputs, label in tqdm(loader, leave=False, desc="Validation", disable=LOGGER.level > logging.INFO):
@@ -90,27 +93,43 @@ def evaluate_model(model, criterion, loader, device):
             loss = criterion(outputs, label.view(-1))
 
             running_loss += loss.item() * inputs.size(0)
+            inputs_processed += inputs.size(0)
 
-    return running_loss / len(loader.dataset)
+    return running_loss / inputs_processed
+
+
+def collate(samples):
+    """Collate the samples into a batch"""
+    images = [s["image"] for s in samples]
+    labels = [s["label"] for s in samples]
+
+    return torch.stack(images), torch.tensor(labels)
+
+
+def preprocess(trans: Callable, label_key: str, sample):
+    """Pereprocess the webdataset sample"""
+    return {"image": trans(sample["jpg"]), "label": sample["json"][label_key]}
 
 
 def main(args):
-    # train the model
+    """train the model"""
+
     LOGGER.info("Training the model to classify %s", args.output_name)
 
     if not os.path.exists(args.output):
         os.makedirs(args.output)
 
-    train_file = os.path.join(args.input, "train.jsonl")
-    val_file = os.path.join(args.input, "val.jsonl")
-
     model, transform = utils.continuous_single_output_model_factory(args.model)
 
-    train_dataset = SeeSeaDataset(train_file, observation_key=args.output_name, transform=transform)
-    val_dataset = SeeSeaDataset(val_file, observation_key=args.output_name, transform=transform)
+    map_fn = partial(preprocess, transform, args.output_name)
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=4)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=4)
+    train_ds = load_dataset("webdataset", data_dir=args.input, split="train", streaming=True).shuffle().map(map_fn)
+    val_ds = load_dataset("webdataset", data_dir=args.input, split="validation", streaming=True).map(map_fn)
+
+    print(train_ds.info)
+
+    train_loader = DataLoader(train_ds, collate_fn=collate, batch_size=args.batch_size)
+    val_loader = DataLoader(val_ds, collate_fn=collate, batch_size=args.batch_size)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -126,6 +145,7 @@ def main(args):
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
     # step scheduler
     # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=6, gamma=0.1)
+    # schuduler = OneCycleLR(optimizer, max_lr=args.learning_rate, epochs=args.epochs, steps_per_epoch=len(train_loader))
 
     training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
@@ -136,16 +156,28 @@ def main(args):
 
         LOGGER.debug("Starting epoch %d/%d", epoch + 1, args.epochs)
         # Training Phase
+        epoch_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
         epoch_loss = train_one_epoch(model, criterion, optimizer, train_loader, device, None)
         train_losses.append(epoch_loss)
-        LOGGER.info("Epoch %d/%d, Training Loss: %.4f", epoch + 1, args.epochs, epoch_loss)
-
-        # scheduler.step()
+        LOGGER.info(
+            "Epoch %d/%d, Training Loss: %.4f, time: %s",
+            epoch + 1,
+            args.epochs,
+            epoch_loss,
+            datetime.datetime.now(tz=datetime.timezone.utc) - epoch_start_time,
+        )
 
         # Validation Phase
+        val_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
         val_epoch_loss = evaluate_model(model, criterion, val_loader, device)
         val_losses.append(val_epoch_loss)
-        LOGGER.info("Epoch %d/%d, Validation Loss: %.4f", epoch + 1, args.epochs, val_epoch_loss)
+        LOGGER.info(
+            "Epoch %d/%d, Validation Loss: %.4f, time: %s",
+            epoch + 1,
+            args.epochs,
+            val_epoch_loss,
+            datetime.datetime.now(tz=datetime.timezone.utc) - val_start_time,
+        )
 
     training_end_time = datetime.datetime.now(tz=datetime.timezone.utc)
     LOGGER.info("Training complete. Training time: %s", training_end_time - training_start_time)

@@ -2,6 +2,7 @@ import json
 import os
 from dataclasses import dataclass, asdict
 from typing import List
+import re
 
 from seesea import utils
 import webdataset as wds
@@ -81,3 +82,21 @@ def to_webdataset(image_observations: List[ImageObservation], output_dir: str):
                     "json": io.observation.to_dict(),
                 }
             )
+
+
+def get_all_image_observations(input_dir: str) -> List[ImageObservation]:
+    observation_file_paths = utils.get_all_files(input_dir, re.compile(r"observation.json", re.IGNORECASE))
+    image_observations: List[ImageObservation] = []
+
+    for obs_path in observation_file_paths:
+
+        # Load the observation from the file
+        observation_json = utils.load_json(obs_path)
+        if observation_json is None:
+            continue
+
+        observation = Observation(**observation_json)
+        image_paths = utils.get_all_files(os.path.dirname(obs_path), re.compile(r"\d+.jpg", re.IGNORECASE))
+        image_observations.extend([ImageObservation(image_path, observation) for image_path in image_paths])
+
+    return image_observations

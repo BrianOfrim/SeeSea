@@ -7,10 +7,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import seesea.utils as utils
-from seesea.observation import Observation, from_huggingface_dataset
+
+from seesea.observation import Observation, get_all_image_observations
 
 LOGGER = logging.getLogger(__name__)
-
 
 if __name__ == "__main__":
     import argparse
@@ -42,7 +42,7 @@ if __name__ == "__main__":
     # get the observations from the image observation json file
     LOGGER.info("Getting image observation data from %s", input_args.input)
 
-    image_observations = from_huggingface_dataset(input_args.input)
+    image_observations = get_all_image_observations(input_args.input)
 
     if len(image_observations) == 0:
         LOGGER.error("No image observation data found in %s", input_args.input)

@@ -4,33 +4,15 @@ A script to read images from the buoycam dataset and filter them based on bright
 
 import os
 import logging
-import re
+
 from typing import List, Tuple
 
 import numpy as np
 import seesea.utils as utils
-from seesea.observation import Observation, ImageObservation, to_webdataset
+from seesea.observation import Observation, ImageObservation, to_webdataset, get_all_image_observations
 
 
 LOGGER = logging.getLogger(__name__)
-
-
-def get_all_image_observations(input_dir: str) -> List[ImageObservation]:
-    observation_file_paths = utils.get_all_files(input_dir, re.compile(r"observation.json", re.IGNORECASE))
-    image_observations: List[ImageObservation] = []
-
-    for obs_path in observation_file_paths:
-
-        # Load the observation from the file
-        observation_json = utils.load_json(obs_path)
-        if observation_json is None:
-            continue
-
-        observation = Observation(**observation_json)
-        image_paths = utils.get_all_files(os.path.dirname(obs_path), re.compile(r"\d+.jpg", re.IGNORECASE))
-        image_observations.extend([ImageObservation(image_path, observation) for image_path in image_paths])
-
-    return image_observations
 
 
 def filter_by_observation_keys(
@@ -159,7 +141,7 @@ if __name__ == "__main__":
     to_webdataset(test_image_observations, test_path)
     LOGGER.info("Wrote %d test image observations to %s", len(test_image_observations), test_path)
 
-    validation_path = os.path.join(input_args.output, "val")
+    validation_path = os.path.join(input_args.output, "validation")
     to_webdataset(validation_image_observations, validation_path)
     LOGGER.info("Wrote %d validation image observations to %s", len(validation_image_observations), validation_path)
 
