@@ -5,24 +5,19 @@ import logging
 import datetime
 import json
 from dataclasses import dataclass, asdict
-from typing import List, Tuple, Callable
+from typing import List, Callable
 from functools import partial
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torchvision import transforms, models
 from torch.optim.lr_scheduler import OneCycleLR
-from datasets import load_dataset, Image
-import numpy as np
+from datasets import load_dataset
 import matplotlib.pyplot as plt
-from PIL import Image
 from tqdm import tqdm
 
 
 import seesea.utils as utils
-
-# from seesea.seesea_dataset import SeeSeaDataset
 
 LOGGER = logging.getLogger(__name__)
 
@@ -125,8 +120,6 @@ def main(args):
 
     train_ds = load_dataset("webdataset", data_dir=args.input, split="train", streaming=True).shuffle().map(map_fn)
     val_ds = load_dataset("webdataset", data_dir=args.input, split="validation", streaming=True).map(map_fn)
-
-    print(train_ds.info)
 
     train_loader = DataLoader(train_ds, collate_fn=collate, batch_size=args.batch_size)
     val_loader = DataLoader(val_ds, collate_fn=collate, batch_size=args.batch_size)
