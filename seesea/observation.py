@@ -1,7 +1,7 @@
 import json
 import os
 from dataclasses import dataclass, asdict
-from typing import List
+from typing import List, Optional
 import re
 
 from seesea import utils
@@ -16,24 +16,24 @@ class Observation:
 
     station_id: str
     timestamp: str
-    description: str
     lat_deg: float
     lon_deg: float
-    wind_speed_mps: float
-    wind_direction_deg: float
-    gust_speed_mps: float
-    wave_height_m: float
-    dominant_wave_period_s: float
-    average_wave_period_s: float
-    mean_wave_direction_deg: float
-    atmospheric_pressure_hpa: float
-    air_temperature_c: float
-    water_temperature_c: float
-    dewpoint_temperature_c: float
-    visibility_nmi: float
-    pressure_tendency_hpa: float
-    tide_m: float
-    bearing_of_first_image_deg: int = None
+    description: Optional[str] = None
+    wind_speed_mps: Optional[float] = None
+    wind_direction_deg: Optional[float] = None
+    gust_speed_mps: Optional[float] = None
+    wave_height_m: Optional[float] = None
+    dominant_wave_period_s: Optional[float] = None
+    average_wave_period_s: Optional[float] = None
+    mean_wave_direction_deg: Optional[float] = None
+    atmospheric_pressure_hpa: Optional[float] = None
+    air_temperature_c: Optional[float] = None
+    water_temperature_c: Optional[float] = None
+    dewpoint_temperature_c: Optional[float] = None
+    pressure_tendency_hpa: Optional[float] = None
+    visibility_nmi: Optional[float] = None
+    tide_m: Optional[float] = None
+    bearing_of_first_image_deg: Optional[float] = None
 
     def __str__(self):
         return (
@@ -75,13 +75,10 @@ def to_webdataset(image_observations: List[ImageObservation], output_dir: str):
     with wds.ShardWriter(os.path.join(output_dir, "%06d.tar"), maxsize=1e9) as sink:
         for io in image_observations:
             image = utils.load_image(io.image_path)
-            sink.write(
-                {
-                    "__key__": io.base_filename(),
-                    "jpg": image,
-                    "json": io.observation.to_dict(),
-                }
-            )
+            observation_dict = io.observation.to_dict()
+            # remove any null attributes
+            observation_dict = {k: v for k, v in observation_dict.items() if v is not None}
+            sink.write({"__key__": io.base_filename(), "jpg": image, "json": observation_dict})
 
 
 def get_all_image_observations(input_dir: str) -> List[ImageObservation]:

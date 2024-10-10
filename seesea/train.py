@@ -11,6 +11,7 @@ from functools import partial
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torchvision import transforms
 from torch.optim.lr_scheduler import OneCycleLR
 from datasets import load_dataset
 import matplotlib.pyplot as plt
@@ -101,9 +102,9 @@ def collate(samples):
     return torch.stack(images), torch.tensor(labels)
 
 
-def preprocess(trans: Callable, label_key: str, sample):
+def preprocess(transform: Callable, label_key: str, sample):
     """Pereprocess the webdataset sample"""
-    return {"image": trans(sample["jpg"]), "label": sample["json"][label_key]}
+    return {"image": transform(sample["jpg"]), "label": sample["json"][label_key]}
 
 
 def main(args):
@@ -114,12 +115,26 @@ def main(args):
     if not os.path.exists(args.output):
         os.makedirs(args.output)
 
-    model, transform = utils.continuous_single_output_model_factory(args.model)
+    model, base_transform = utils.continuous_single_output_model_factory(args.model)
 
-    map_fn = partial(preprocess, transform, args.output_name)
+    train_transform = base_transform
 
-    train_ds = load_dataset("webdataset", data_dir=args.input, split="train", streaming=True).shuffle().map(map_fn)
-    val_ds = load_dataset("webdataset", data_dir=args.input, split="validation", streaming=True).map(map_fn)
+    if args.rotation is not None:
+        train_transform = transforms.Compose(
+            [
+                transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR),
+                train_transform,
+            ]
+        )
+        LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
+
+    train_map_fn = partial(preprocess, train_transform, args.output_name)
+    validation_map_fn = partial(preprocess, base_transform, args.output_name)
+
+    train_ds = (
+        load_dataset("webdataset", data_dir=args.input, split="train", streaming=True).shuffle().map(train_map_fn)
+    )
+    val_ds = load_dataset("webdataset", data_dir=args.input, split="validation", streaming=True).map(validation_map_fn)
 
     train_loader = DataLoader(train_ds, collate_fn=collate, batch_size=args.batch_size)
     val_loader = DataLoader(val_ds, collate_fn=collate, batch_size=args.batch_size)
@@ -241,6 +256,9 @@ def get_args_parser():
         default="wind_speed_mps",
     )
     parser.add_argument("--model-path", type=str, help="The path to save the trained model", default="model.pth")
+    parser.add_argument(
+        "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
+    )
     return parser
 
 

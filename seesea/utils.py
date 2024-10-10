@@ -11,6 +11,7 @@ from typing import Type, Any, Tuple, Callable
 
 import requests
 import numpy as np
+import cv2
 from PIL import Image
 import torch.nn as nn
 import torch
@@ -130,6 +131,15 @@ def get_brightness(img: Image) -> float:
     img_array = np.array(img, dtype=np.uint8)
     mean = np.mean(img_array)
     return mean
+
+
+def get_sharpness(img: Image) -> float:
+
+    # Apply the Laplacian operator
+    laplacian = cv2.Laplacian(np.array(img.convert("L")), cv2.CV_64F)
+
+    # Compute the variance of the Laplacian
+    return laplacian.var()
 
 
 def from_dict(dataclass_type: Type[Any], data: dict) -> Any:

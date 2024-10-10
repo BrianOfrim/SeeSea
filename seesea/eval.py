@@ -5,7 +5,6 @@ import logging
 
 import torch
 import matplotlib.pyplot as plt
-
 from datasets import load_dataset
 
 import seesea.utils as utils
@@ -75,20 +74,23 @@ def main(args):
 
             output = model(tranformed_image)
 
+            # get original image brightness
+            brightness = utils.get_brightness(image)
+            sharpness = utils.get_sharpness(image)
+
             LOGGER.info(
                 "%s: Predicted: %f, Expected: %f, Diff: %f", name, output.item(), target, output.item() - target
             )
 
-            # get original image brightness
-            brightness = utils.get_brightness(image)
+            LOGGER.debug("Brightness: %f, Sharpness: %f", brightness, sharpness)
 
             plt.imshow(image)
             plt.title(f"Image: {name} {training_details.output_name}")
             plt.axis("off")
 
             plt.suptitle(
-                f"Expected: {target:.3f}, Predicted: {output.item():.3f}, Diff:"
-                f" {output.item() - target:.3f}, Brightness: {brightness:.2f}"
+                f"target: {target:.3f}, out: {output.item():.3f}, diff:"
+                f" {output.item() - target:.3f}, bright: {brightness:.2f}, sharp: {sharpness:.2f}"
             )
 
             plt.show()
