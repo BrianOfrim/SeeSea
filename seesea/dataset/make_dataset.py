@@ -8,8 +8,8 @@ import logging
 from typing import List, Tuple
 
 import numpy as np
-import seesea.utils as utils
-from seesea.observation import Observation, ImageObservation, to_webdataset, get_all_image_observations
+from seesea.common import utils
+from seesea.common.observation import Observation, ImageObservation, to_webdataset, get_all_image_observations
 
 
 LOGGER = logging.getLogger(__name__)

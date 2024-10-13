@@ -2,13 +2,12 @@
 
 import os
 import logging
+import math
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-import seesea.utils as utils
-
-from seesea.observation import Observation, get_all_image_observations
+from seesea.common.observation import Observation, get_all_image_observations
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,10 +62,12 @@ if __name__ == "__main__":
         values = [getattr(obs.observation, key) for obs in image_observations]
         # remove None values
         values = [value for value in values if value is not None]
+        values = [value for value in values if not math.isnan(value)]
 
         if len(values) == 0:
             LOGGER.warning("No values found for %s", key)
             continue
+
         LOGGER.info("%s statistics:", key)
 
         values.sort()
@@ -79,6 +80,11 @@ if __name__ == "__main__":
 
         # get all unique values
         unique_values = np.unique(values)
+
+        if len(unique_values) == 0:
+            LOGGER.warning("No unique values found for %s", key)
+            continue
+
         LOGGER.info("\tTotal values %d, Unique values: %d", len(values), len(unique_values))
 
         LOGGER.info(

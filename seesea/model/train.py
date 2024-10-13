@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 
-import seesea.utils as utils
+import seesea.common.utils as utils
 
 LOGGER = logging.getLogger(__name__)
 

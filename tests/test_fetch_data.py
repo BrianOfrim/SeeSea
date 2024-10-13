@@ -1,6 +1,6 @@
 import unittest
 from datetime import datetime
-from seesea.buoycam_fetcher import extend_to_past, BuoyInfo, BuoyPosition
+from seesea.dataset.fetch_data import extend_to_past, BuoyInfo, BuoyPosition
 
 
 class TestExtendToPast(unittest.TestCase):

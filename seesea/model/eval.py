@@ -7,8 +7,8 @@ import torch
 import matplotlib.pyplot as plt
 from datasets import load_dataset
 
-import seesea.utils as utils
-from seesea.train import TrainingDetails
+import seesea.common.utils as utils
+from seesea.model.train import TrainingDetails
 
 LOGGER = logging.getLogger(__name__)
 

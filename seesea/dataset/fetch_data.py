@@ -18,8 +18,8 @@ from PIL import Image
 import numpy as np
 import easyocr
 
-import seesea.utils as utils
-from seesea.observation import Observation
+from seesea.common import utils
+from seesea.common.observation import Observation
 
 BUOYCAM_LIST_URL = "https://www.ndbc.noaa.gov/buoycams.php"
 BUOYCAM_IMAGE_FILE_URL_BASE = "https://www.ndbc.noaa.gov/images/buoycam"

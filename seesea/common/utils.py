@@ -38,7 +38,13 @@ def is_match(pattern: re.Pattern, text: str) -> bool:
 
 def entry_exists(obj, key):
     """Check if a key exists in a dictionary and it's value is not None"""
-    return key in obj and obj[key] is not None
+    if key not in obj:
+        return False
+    if obj[key] is None:
+        return False
+    if isinstance(obj[key], float) and math.isnan(obj[key]):
+        return False
+    return True
 
 
 def entries_exist(obj, keys):
@@ -48,7 +54,16 @@ def entries_exist(obj, keys):
 
 def attribute_exists(obj, key):
     """Check if a key exists in an object and it's value is not None"""
-    return hasattr(obj, key) and getattr(obj, key) is not None and getattr(obj, key) is not math.nan
+    if not hasattr(obj, key):
+        return False
+
+    attr = getattr(obj, key)
+    if attr is None:
+        return False
+
+    if isinstance(attr, float) and math.isnan(attr):
+        return False
+    return True
 
 
 def attributes_exist(obj, keys):
@@ -103,6 +118,13 @@ def load_image(image_path: str) -> Image:
         LOGGER.warning("\tError loading image %s: %s", image_path, e)
         return None
     return img
+
+
+def clear_directory(directory):
+    """Remove all files in a directory"""
+    for root, dirs, files in os.walk(directory):
+        for file in files:
+            os.remove(os.path.join(root, file))
 
 
 def get_all_files(directory, reegex_pattern: re.Pattern = None):

@@ -1,13 +1,13 @@
-import json
+"""Data classes and functions for working with buoy observations"""
+
 import os
 import math
 from dataclasses import dataclass, asdict
 from typing import List
 import re
 import copy
-import math
 
-from seesea import utils
+from seesea.common import utils
 import webdataset as wds
 
 DEGREES_PER_IMAGE = 360 / 6
@@ -76,6 +76,8 @@ def to_webdataset(image_observations: List[ImageObservation], output_dir: str):
 
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
+    else:
+        utils.clear_directory(output_dir)
 
     # write a webdataset recipe file
     with wds.ShardWriter(os.path.join(output_dir, "%06d.tar"), maxsize=1e9) as sink:

@@ -4,8 +4,8 @@ import re
 import json
 import math
 
-import seesea.utils as utils
-from seesea.observation import Observation
+import seesea.common.utils as utils
+from seesea.common.observation import Observation
 
 LOGGER = logging.getLogger(__name__)
 
