@@ -77,12 +77,13 @@ def main(args):
             # get original image brightness
             brightness = utils.get_brightness(image)
             sharpness = utils.get_sharpness(image)
+            dropplets = utils.detect_water_droplets(image)
 
             LOGGER.info(
                 "%s: Predicted: %f, Expected: %f, Diff: %f", name, output.item(), target, output.item() - target
             )
 
-            LOGGER.debug("Brightness: %f, Sharpness: %f", brightness, sharpness)
+            LOGGER.debug("Brightness: %f, Sharpness: %f, Dropplets %s", brightness, sharpness, dropplets)
 
             plt.imshow(image)
             plt.title(f"Image: {name} {training_details.output_name}")

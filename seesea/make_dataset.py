@@ -18,6 +18,7 @@ LOGGER = logging.getLogger(__name__)
 def filter_by_observation_keys(
     image_observations: List[ImageObservation], observation_keys: List[str]
 ) -> List[ImageObservation]:
+    """Filter the image observations based on the keys that must be present in the observation"""
     filtered_image_observations = []
     for image_observation in image_observations:
         if utils.attributes_exist(image_observation.observation, observation_keys):
@@ -26,6 +27,7 @@ def filter_by_observation_keys(
 
 
 def calculate_image_brightnesses(image_observations: List[ImageObservation]) -> List[Tuple[ImageObservation, float]]:
+    """Calculate the brightness of each image in the dataset"""
     image_brighnesses: List[(ImageObservation, float)] = []
 
     for i, image_observation in enumerate(image_observations):
@@ -42,6 +44,7 @@ def calculate_image_brightnesses(image_observations: List[ImageObservation]) -> 
 
 
 def filter_by_brightness(image_observations: List[ImageObservation], min: float, max: float) -> List[ImageObservation]:
+    """Filter the images based on their brightness"""
     image_brighnesses = calculate_image_brightnesses(image_observations)
 
     # Print how many images were less than the min and how many were greater than the max
@@ -89,9 +92,9 @@ if __name__ == "__main__":
         help="Values that must be present in the observation in order to include it's images in the dataset",
         default=None,
     )
-    arg_parser.add_argument("--test-split", type=float, help="The fraction of images to use for testing", default=0.15)
+    arg_parser.add_argument("--test-split", type=float, help="The fraction of images to use for testing", default=0.1)
     arg_parser.add_argument(
-        "--validation-split", type=float, help="The fraction of images to use for validation", default=0.15
+        "--validation-split", type=float, help="The fraction of images to use for validation", default=0.1
     )
     input_args = arg_parser.parse_args()
 

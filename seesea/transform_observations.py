@@ -2,17 +2,12 @@ import os
 import logging
 import re
 import json
+import math
 
 import seesea.utils as utils
 from seesea.observation import Observation
 
 LOGGER = logging.getLogger(__name__)
-
-
-def kts_to_mps(kts: float) -> float:
-    """Convert knots to meters per second"""
-    return kts / 1.94384
-
 
 if __name__ == "__main__":
     print("Transforming observation files")
@@ -43,13 +38,18 @@ if __name__ == "__main__":
             LOGGER.error("Failed to load observations from %s", observation_file_path)
             continue
 
-        if "id" in observation:
-
-            observation["station_id"] = observation["id"]
-            del observation["id"]
-
         # write the transformed observation the file
         observation_obj = utils.from_dict(Observation, observation)
+
+        # Accessing the attribute types using __annotations__
+        attribute_types = Observation.__annotations__
+
+        for key, type in attribute_types.items():
+            if observation_obj.__dict__[key] == None:
+                if type == float:
+                    observation_obj.__dict__[key] = math.nan
+                elif type == str:
+                    observation_obj.__dict__[key] = ""
 
         with open(observation_file_path, "w", encoding="utf-8") as file:
             file.write(json.dumps(observation_obj.to_dict(), indent=4))

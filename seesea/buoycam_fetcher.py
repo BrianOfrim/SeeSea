@@ -9,6 +9,7 @@ import threading
 import time
 from typing import Dict, List
 import json
+import math
 
 import requests
 
@@ -267,9 +268,9 @@ def extract_table_data(url: str) -> list:
 
 def get_float(row: dict, key: str) -> float:
     if key not in row:
-        return None
+        return math.nan
     if row[key] == MISSING_DATA_INDICATOR:
-        return None
+        return math.nan
 
     return float(row[key])
 
@@ -325,7 +326,7 @@ def get_angle_from_image(img: Image, ocr_reader: OCR):
     assert img.width == IMAGE_WIDTH and img.height == IMAGE_HEIGHT
     angle_crop = img.crop((150, img.height - 30, 250, img.height))
     # Extract the angle from the image
-    return ocr_reader.get_angle_from_image(angle_crop)
+    return float(ocr_reader.get_angle_from_image(angle_crop))
 
 
 def fetch_image(request: BuoyInfo) -> Image:
@@ -438,7 +439,7 @@ def image_pipeline(info: BuoyInfo, observation: Observation, output_dir: str, oc
         return False
 
     if ocr_reader is not None:
-        observation.bearing_of_first_image_deg = get_angle_from_image(image, ocr_reader)
+        observation.image_direction_deg = get_angle_from_image(image, ocr_reader)
 
     save_image(image, info, output_dir)
     save_observation_data(observation, info, output_dir)

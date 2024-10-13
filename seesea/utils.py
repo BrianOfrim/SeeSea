@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import json
+import math
 from io import BytesIO
 from typing import Type, Any, Tuple, Callable
 
@@ -47,7 +48,7 @@ def entries_exist(obj, keys):
 
 def attribute_exists(obj, key):
     """Check if a key exists in an object and it's value is not None"""
-    return hasattr(obj, key) and getattr(obj, key) is not None
+    return hasattr(obj, key) and getattr(obj, key) is not None and getattr(obj, key) is not math.nan
 
 
 def attributes_exist(obj, keys):
@@ -134,12 +135,30 @@ def get_brightness(img: Image) -> float:
 
 
 def get_sharpness(img: Image) -> float:
+    """Get the sharpness of an image"""
 
     # Apply the Laplacian operator
     laplacian = cv2.Laplacian(np.array(img.convert("L")), cv2.CV_64F)
 
     # Compute the variance of the Laplacian
     return laplacian.var()
+
+
+def detect_water_droplets(img):
+    """Detect water droplets in an image"""
+
+    # Apply a Gaussian blur to reduce noise and improve circle detection
+    blurred = cv2.GaussianBlur(np.array(img.convert("L")), (9, 9), 2)
+
+    # Use HoughCircles to detect circular shapes
+    circles = cv2.HoughCircles(
+        blurred, cv2.HOUGH_GRADIENT, dp=1.2, minDist=20, param1=100, param2=30, minRadius=10, maxRadius=100
+    )
+
+    if circles is None:
+        return None
+
+    return np.round(circles[0, :]).astype("int")
 
 
 def from_dict(dataclass_type: Type[Any], data: dict) -> Any:
