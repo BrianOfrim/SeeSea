@@ -4,8 +4,8 @@ import os
 import logging
 import datetime
 import json
-from dataclasses import dataclass, asdict
-from typing import List, Callable
+
+from typing import Callable
 from functools import partial
 
 import torch
@@ -15,83 +15,12 @@ from torchvision import transforms
 from torch.optim.lr_scheduler import OneCycleLR
 from datasets import load_dataset
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-
 
 import seesea.common.utils as utils
+from seesea.model.training_results import TrainingResults
+from seesea.model import engine
 
 LOGGER = logging.getLogger(__name__)
-
-
-@dataclass
-class TrainingDetails:
-    model: str
-    output_name: str
-    epochs: int
-    batch_size: int
-    learning_rate: float
-    training_start_time: str
-    training_end_time: str
-    train_losses: List[float]
-    val_losses: List[float]
-
-    def to_dict(self):
-        """Convert the dataclass to a dictionary"""
-        return asdict(self)
-
-
-def train_one_epoch(model, criterion, optimizer, loader, device, scheduler=None):
-    """Train the model for one epoch"""
-    model.train()
-    running_loss = 0.0
-    inputs_processed = 0
-
-    for inputs, label in tqdm(loader, leave=False, desc="Training", disable=LOGGER.level > logging.INFO):
-        # pring the percentage of the dataset that has been processed
-
-        inputs = inputs.to(device)
-        label = label.to(device)
-
-        # Zero the parameter gradients
-        optimizer.zero_grad()
-
-        # Forward pass
-        outputs = model(inputs)
-        outputs = outputs.view(-1)  # Flatten outputs to match wind_speeds shape
-        loss = criterion(outputs, label.view(-1))
-
-        # Backward pass and optimization
-        loss.backward()
-        optimizer.step()
-
-        if scheduler is not None:
-            scheduler.step()
-
-        running_loss += loss.item() * inputs.size(0)
-        inputs_processed += inputs.size(0)
-
-    return running_loss / inputs_processed
-
-
-def evaluate_model(model, criterion, loader, device):
-    """Evaluate the model"""
-    model.eval()
-    running_loss = 0.0
-    inputs_processed = 0
-
-    with torch.no_grad():
-        for inputs, label in tqdm(loader, leave=False, desc="Validation", disable=LOGGER.level > logging.INFO):
-            inputs = inputs.to(device)
-            label = label.to(device)
-
-            outputs = model(inputs)
-            outputs = outputs.view(-1)
-            loss = criterion(outputs, label.view(-1))
-
-            running_loss += loss.item() * inputs.size(0)
-            inputs_processed += inputs.size(0)
-
-    return running_loss / inputs_processed
 
 
 def collate(samples):
@@ -128,16 +57,16 @@ def main(args):
         )
         LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
 
-    train_map_fn = partial(preprocess, train_transform, args.output_name)
-    validation_map_fn = partial(preprocess, base_transform, args.output_name)
+    train_map_fn = partial(engine.preprocess, train_transform, args.output_name)
+    validation_map_fn = partial(engine.preprocess, base_transform, args.output_name)
 
     train_ds = (
         load_dataset("webdataset", data_dir=args.input, split="train", streaming=True).shuffle().map(train_map_fn)
     )
     val_ds = load_dataset("webdataset", data_dir=args.input, split="validation", streaming=True).map(validation_map_fn)
 
-    train_loader = DataLoader(train_ds, collate_fn=collate, batch_size=args.batch_size)
-    val_loader = DataLoader(val_ds, collate_fn=collate, batch_size=args.batch_size)
+    train_loader = DataLoader(train_ds, collate_fn=engine.collate, batch_size=args.batch_size)
+    val_loader = DataLoader(val_ds, collate_fn=engine.collate, batch_size=args.batch_size)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -157,15 +86,22 @@ def main(args):
 
     training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
+    timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
+    model_dir = os.path.join(args.output, timestamp_str)
+    model_filepath = os.path.join(model_dir, "model.pth")
+
     train_losses = []
     val_losses = []
+
+    min_loss = float("inf")
+
     # Training Loop
     for epoch in range(args.epochs):
 
         LOGGER.debug("Starting epoch %d/%d", epoch + 1, args.epochs)
         # Training Phase
         epoch_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
-        epoch_loss = train_one_epoch(model, criterion, optimizer, train_loader, device, None)
+        epoch_loss = engine.train_one_epoch(model, criterion, optimizer, train_loader, device, None)
         train_losses.append(epoch_loss)
         LOGGER.info(
             "Epoch %d/%d, Training Loss: %.4f, time: %s",
@@ -177,7 +113,7 @@ def main(args):
 
         # Validation Phase
         val_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
-        val_epoch_loss = evaluate_model(model, criterion, val_loader, device)
+        val_epoch_loss = engine.evaluate_model(model, criterion, val_loader, device)
         val_losses.append(val_epoch_loss)
         LOGGER.info(
             "Epoch %d/%d, Validation Loss: %.4f, time: %s",
@@ -187,18 +123,17 @@ def main(args):
             datetime.datetime.now(tz=datetime.timezone.utc) - val_start_time,
         )
 
+        if val_epoch_loss < min_loss:
+            if not os.path.exists(model_filepath):
+                os.mkdir(model_filepath)
+            min_loss = val_epoch_loss
+            LOGGER.info("New best model found. Saving model to %s", model_filepath)
+            torch.save(model.state_dict(), model_filepath)
+
     training_end_time = datetime.datetime.now(tz=datetime.timezone.utc)
     LOGGER.info("Training complete. Training time: %s", training_end_time - training_start_time)
 
     # Save the model
-    timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
-    model_dir = os.path.join(args.output, timestamp_str)
-
-    if not os.path.exists(model_dir):
-        os.mkdir(model_dir)
-
-    model_filepath = os.path.join(model_dir, "model.pth")
-    torch.save(model.state_dict(), model_filepath)
 
     # Plot the training and validation loss
     plt.plot(train_losses, label="Training Loss")
@@ -210,7 +145,7 @@ def main(args):
     loss_plot_filepath = os.path.join(model_dir, "loss_plot.png")
     plt.savefig(loss_plot_filepath)
 
-    training_details = TrainingDetails(
+    training_details = TrainingResults(
         model=args.model,
         output_name=args.output_name,
         epochs=args.epochs,
@@ -226,15 +161,6 @@ def main(args):
         json.dump(training_details.to_dict(), f, indent=4)
 
     LOGGER.info("Output saved to %s", model_dir)
-
-    # start a new figure
-    plt.figure()
-
-    # Plot the learning rates
-    plt.xlabel("Batch")
-    plt.ylabel("Learning Rate")
-    plt.title("Learning Rate Schedule")
-    plt.savefig(os.path.join(model_dir, "learning_rate_plot.png"))
 
 
 def get_args_parser():

@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from datasets import load_dataset
 
 import seesea.common.utils as utils
-from seesea.model.train import TrainingDetails
+from seesea.model.training_results import TrainingResults
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,7 +37,7 @@ def main(args):
         LOGGER.error("Model weights file %s does not exist.", model_weights_path)
         return
 
-    training_details = utils.from_dict(TrainingDetails, training_details_json)
+    training_details = utils.from_dict(TrainingResults, training_details_json)
 
     LOGGER.debug("Loaded training details: %s", training_details)
 
