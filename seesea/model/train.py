@@ -5,7 +5,6 @@ import logging
 import datetime
 import json
 
-from typing import Callable
 from functools import partial
 
 import torch
@@ -23,19 +22,6 @@ from seesea.model import engine
 LOGGER = logging.getLogger(__name__)
 
 
-def collate(samples):
-    """Collate the samples into a batch"""
-    images = [s["image"] for s in samples]
-    labels = [s["label"] for s in samples]
-
-    return torch.stack(images), torch.tensor(labels)
-
-
-def preprocess(transform: Callable, label_key: str, sample):
-    """Pereprocess the webdataset sample"""
-    return {"image": transform(sample["jpg"]), "label": sample["json"][label_key]}
-
-
 def main(args):
     """train the model"""
 
@@ -44,7 +30,7 @@ def main(args):
     if not os.path.exists(args.output):
         os.makedirs(args.output)
 
-    model, base_transform = utils.continuous_single_output_model_factory(args.model)
+    model, base_transform = engine.continuous_single_output_model_factory(args.model)
 
     train_transform = base_transform
 
@@ -124,8 +110,8 @@ def main(args):
         )
 
         if val_epoch_loss < min_loss:
-            if not os.path.exists(model_filepath):
-                os.mkdir(model_filepath)
+            if not os.path.exists(model_dir):
+                os.mkdir(model_dir)
             min_loss = val_epoch_loss
             LOGGER.info("New best model found. Saving model to %s", model_filepath)
             torch.save(model.state_dict(), model_filepath)

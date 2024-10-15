@@ -9,7 +9,6 @@ import json
 import torch
 from torch.utils.data import DataLoader
 from datasets import load_dataset
-from torch import nn
 from tqdm import tqdm
 import numpy as np
 import matplotlib.pyplot as plt
@@ -147,7 +146,7 @@ def main(args):
 
     LOGGER.debug("Loaded training details: %s", training_details)
 
-    model, transform = utils.continuous_single_output_model_factory(training_details.model, model_weights_path)
+    model, transform = engine.continuous_single_output_model_factory(training_details.model, model_weights_path)
 
     map_fn = partial(engine.preprocess, transform, training_details.output_name)
     test_ds = load_dataset("webdataset", data_dir=args.input, split=args.split, streaming=True).map(map_fn)

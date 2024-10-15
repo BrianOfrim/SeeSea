@@ -1,9 +1,13 @@
+import os
 import logging
 import math
-from typing import Callable
+from typing import Callable, Tuple
 
 import torch
+from torch import nn
 from tqdm import tqdm
+
+import timm
 
 LOGGER = logging.getLogger(__name__)
 
@@ -76,3 +80,30 @@ def evaluate_model(model, criterion, loader, device):
         return math.inf
 
     return running_loss / inputs_processed
+
+
+def continuous_single_output_model_factory(model_name: str, weights_path: str = None) -> Tuple[nn.Module, Callable]:
+    """
+    Create a model with one continuous output from the model name and weights path
+
+    Args:
+        model_name: The name of the model to create
+        weights_path: The path to the weights file to load into the model. If None, the default weights are used
+
+    Returns:
+        The model and an image transform function
+    """
+
+    model = timm.create_model(model_name, pretrained=True, num_classes=1)
+
+    data_cfg = timm.data.resolve_data_config(model.pretrained_cfg)
+    transform = timm.data.create_transform(**data_cfg)
+
+    if weights_path is not None:
+        # verify that the weights file exists
+        if not os.path.exists(weights_path):
+            raise ValueError(f"Model weights file {weights_path} does not exist")
+        model.load_state_dict(torch.load(weights_path, weights_only=True))
+        LOGGER.debug("Loaded weights from %s", weights_path)
+
+    return model, transform

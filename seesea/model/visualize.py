@@ -7,7 +7,8 @@ import torch
 import matplotlib.pyplot as plt
 from datasets import load_dataset
 
-import seesea.common.utils as utils
+from seesea.common import utils
+from seesea.model import engine
 from seesea.model.training_results import TrainingResults
 
 LOGGER = logging.getLogger(__name__)
@@ -41,7 +42,7 @@ def main(args):
 
     LOGGER.debug("Loaded training details: %s", training_details)
 
-    model, transform = utils.continuous_single_output_model_factory(training_details.model, model_weights_path)
+    model, transform = engine.continuous_single_output_model_factory(training_details.model, model_weights_path)
 
     eval_ds = load_dataset("webdataset", data_dir=args.input, split=args.split, streaming=True)
     eval_ds = eval_ds.shuffle()
