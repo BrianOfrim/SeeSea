@@ -3,6 +3,7 @@
 import os
 import logging
 from functools import partial
+import datetime
 from typing import Callable
 
 from torchvision import transforms
@@ -15,6 +16,10 @@ from transformers import (
     Trainer,
     DefaultDataCollator,
 )
+import evaluate
+
+import seesea.common.utils as utils
+
 
 LOGGER = logging.getLogger(__name__)
 
@@ -23,6 +28,12 @@ def preprocess_batch(transform: Callable, label_key: str, samples):
     samples["pixel_values"] = [transform(jpg) for jpg in samples["jpg"]]
     samples["label"] = [obj[label_key] for obj in samples["json"]]
     return samples
+
+
+def compute_metrics(metric, eval_pred):
+    logits, labels = eval_pred
+    predictions = logits.squeeze()  # Get predictions from logits
+    return metric.compute(predictions=predictions, references=labels)
 
 
 def main(args):
@@ -35,7 +46,11 @@ def main(args):
 
     image_processor = AutoImageProcessor.from_pretrained(args.model)
 
-    normalize = transforms.Normalize(mean=image_processor.image_mean, std=image_processor.image_std)
+    if utils.attribute_exists(image_processor, "image_mean") and utils.attribute_exists(image_processor, "image_std"):
+        normalize = transforms.Normalize(mean=image_processor.image_mean, std=image_processor.image_std)
+    else:
+        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+
     size = (
         image_processor.size["shortest_edge"]
         if "shortest_edge" in image_processor.size
@@ -57,7 +72,7 @@ def main(args):
         LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
 
     train_map_fn = partial(preprocess_batch, train_transform, args.output_name)
-    validation_map_fn = partial(preprocess_batch, base_transform, args.output_name)
+    base_map_fn = partial(preprocess_batch, base_transform, args.output_name)
 
     num_training_samples = 65536
     steps_per_epoch = num_training_samples // args.batch_size
@@ -81,21 +96,29 @@ def main(args):
         .select_columns(["label", "pixel_values"])
     )
 
-    val_ds = full_dataset["validation"].map(validation_map_fn, batched=True).select_columns(["label", "pixel_values"])
+    val_ds = full_dataset["validation"].map(base_map_fn, batched=True).select_columns(["label", "pixel_values"])
 
     data_collator = DefaultDataCollator()
 
+    mae_metric = evaluate.load("mae")
+
+    training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
+
+    timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
+    model_dir = os.path.join(args.output, timestamp_str)
+
     training_args = TrainingArguments(
-        output_dir="/Volumes/external/tmp",
-        remove_unused_columns=False,
-        eval_strategy="steps",
-        eval_steps=steps_per_epoch,
-        save_strategy="no",
+        output_dir=model_dir,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        save_total_limit=1,
         learning_rate=args.learning_rate,
+        lr_scheduler_type="linear",
+        warmup_ratio=0.15,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         logging_strategy="steps",
-        logging_steps=64,
+        logging_steps=50,
         max_steps=total_steps,
     )
 
@@ -105,10 +128,17 @@ def main(args):
         data_collator=data_collator,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        tokenizer=image_processor,
+        compute_metrics=partial(compute_metrics, mae_metric),
     )
 
     trainer.train()
+
+    # run the test set
+    test_ds = full_dataset["test"].map(base_map_fn, batched=True).select_columns(["label", "pixel_values"])
+
+    test_result = trainer.predict(test_ds)
+
+    LOGGER.info("Test results: %s", test_result)
 
 
 def get_args_parser():
@@ -129,7 +159,6 @@ def get_args_parser():
         help="The observation variable to train the netowrk to classify",
         default="wind_speed_mps",
     )
-    parser.add_argument("--model-path", type=str, help="The path to save the trained model", default="model.pth")
     parser.add_argument(
         "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
     )
