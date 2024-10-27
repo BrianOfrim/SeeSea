@@ -24,13 +24,21 @@ import seesea.common.utils as utils
 LOGGER = logging.getLogger(__name__)
 
 
+def augment_batch(augmentation: Callable, samples):
+    """Preprocess a batch of samples"""
+    samples["jpg"] = [augmentation(jpg) for jpg in samples["jpg"]]
+    return samples
+
+
 def preprocess_batch(transform: Callable, label_key: str, samples):
-    samples["pixel_values"] = [transform(jpg) for jpg in samples["jpg"]]
+    """Preprocess a batch of samples"""
+    samples["pixel_values"] = transform(samples["jpg"])["pixel_values"]
     samples["label"] = [obj[label_key] for obj in samples["json"]]
     return samples
 
 
 def compute_metrics(metric, eval_pred):
+    """Compute the metrics for the evaluation"""
     logits, labels = eval_pred
     predictions = logits.squeeze()  # Get predictions from logits
     return metric.compute(predictions=predictions, references=labels)
@@ -46,33 +54,14 @@ def main(args):
 
     image_processor = AutoImageProcessor.from_pretrained(args.model)
 
-    if utils.attribute_exists(image_processor, "image_mean") and utils.attribute_exists(image_processor, "image_std"):
-        normalize = transforms.Normalize(mean=image_processor.image_mean, std=image_processor.image_std)
-    else:
-        normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-
-    size = (
-        image_processor.size["shortest_edge"]
-        if "shortest_edge" in image_processor.size
-        else (image_processor.size["height"], image_processor.size["width"])
-    )
-    base_transform = transforms.Compose([transforms.RandomResizedCrop(size), transforms.ToTensor(), normalize])
-
     model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True, num_labels=1)
 
-    train_transform = base_transform
-
+    augmentation = None
     if args.rotation is not None:
-        train_transform = transforms.Compose(
-            [
-                transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR),
-                train_transform,
-            ]
-        )
+        augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
         LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
 
-    train_map_fn = partial(preprocess_batch, train_transform, args.output_name)
-    base_map_fn = partial(preprocess_batch, base_transform, args.output_name)
+    map_fn = partial(preprocess_batch, image_processor, args.output_name)
 
     num_training_samples = 65536
     steps_per_epoch = num_training_samples // args.batch_size
@@ -88,15 +77,14 @@ def main(args):
 
     full_dataset = load_dataset("webdataset", data_dir=args.input, streaming=True)
 
-    train_ds = (
-        full_dataset["train"]
-        .map(train_map_fn, batched=True)
-        .take(num_training_samples)
-        .shuffle()
-        .select_columns(["label", "pixel_values"])
-    )
+    train_ds = full_dataset["train"].take(num_training_samples).shuffle()
 
-    val_ds = full_dataset["validation"].map(base_map_fn, batched=True).select_columns(["label", "pixel_values"])
+    if augmentation is not None:
+        train_ds = train_ds.map(partial(augment_batch, augmentation), batched=True)
+
+    train_ds = train_ds.map(map_fn, batched=True).select_columns(["label", "pixel_values"])
+
+    val_ds = full_dataset["validation"].map(map_fn, batched=True).select_columns(["label", "pixel_values"])
 
     data_collator = DefaultDataCollator()
 
@@ -120,6 +108,7 @@ def main(args):
         logging_strategy="steps",
         logging_steps=50,
         max_steps=total_steps,
+        save_safetensors=False,
     )
 
     trainer = Trainer(
@@ -134,7 +123,7 @@ def main(args):
     trainer.train()
 
     # run the test set
-    test_ds = full_dataset["test"].map(base_map_fn, batched=True).select_columns(["label", "pixel_values"])
+    test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["label", "pixel_values"])
 
     test_result = trainer.predict(test_ds)
 
