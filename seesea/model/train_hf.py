@@ -102,7 +102,7 @@ def main(args):
         save_total_limit=1,
         learning_rate=args.learning_rate,
         lr_scheduler_type="linear",
-        warmup_ratio=0.15,
+        warmup_ratio=args.warmup_ratio,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         logging_strategy="steps",
@@ -129,6 +129,23 @@ def main(args):
 
     LOGGER.info("Test results: %s", test_result)
 
+    # save the output name
+    output_name_path = os.path.join(model_dir, "output_name.txt")
+    with open(output_name_path, "w", encoding="utf-8") as output_name_file:
+        output_name_file.write(args.output_name)
+
+    # save the model
+    model_ouput_dir = os.path.join(model_dir, "model")
+    if not os.path.exists(model_ouput_dir):
+        os.makedirs(model_ouput_dir)
+
+    processor_output_dir = os.path.join(model_dir, "processor")
+    if not os.path.exists(processor_output_dir):
+        os.makedirs(processor_output_dir)
+
+    # save the image processor
+    image_processor.save_pretrained(processor_output_dir)
+
 
 def get_args_parser():
     import argparse
@@ -151,6 +168,7 @@ def get_args_parser():
     parser.add_argument(
         "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
     )
+    parser.add_argument("--warmup-ratio", type=float, help="The ratio of steps to use for warmup", default=0.1)
     return parser
 
 
