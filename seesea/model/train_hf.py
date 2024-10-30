@@ -108,7 +108,6 @@ def main(args):
         logging_strategy="steps",
         logging_steps=50,
         max_steps=total_steps,
-        save_safetensors=False,
     )
 
     trainer = Trainer(
@@ -129,22 +128,18 @@ def main(args):
 
     LOGGER.info("Test results: %s", test_result)
 
-    # save the output name
-    output_name_path = os.path.join(model_dir, "output_name.txt")
-    with open(output_name_path, "w", encoding="utf-8") as output_name_file:
-        output_name_file.write(args.output_name)
-
     # save the model
     model_ouput_dir = os.path.join(model_dir, "model")
     if not os.path.exists(model_ouput_dir):
         os.makedirs(model_ouput_dir)
-
-    processor_output_dir = os.path.join(model_dir, "processor")
-    if not os.path.exists(processor_output_dir):
-        os.makedirs(processor_output_dir)
-
+    model.save_pretrained(model_ouput_dir)
     # save the image processor
-    image_processor.save_pretrained(processor_output_dir)
+    image_processor.save_pretrained(model_ouput_dir)
+
+    # save the output name
+    output_name_path = os.path.join(model_ouput_dir, "output_name.txt")
+    with open(output_name_path, "w", encoding="utf-8") as output_name_file:
+        output_name_file.write(args.output_name)
 
 
 def get_args_parser():

@@ -26,6 +26,9 @@ def save_results(inputs, outputs, output_dir):
 
     LOGGER.info("Test results: %s", test_results)
 
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+
     with open(os.path.join(output_dir, "test_results.json"), "w", encoding="utf-8") as f:
         json.dump(test_results, f, indent=4)
 
@@ -87,11 +90,17 @@ def compute_metrics(metric, eval_pred):
 
 
 def main(args):
-    image_processor = AutoImageProcessor.from_pretrained("apple/mobilevit-small")
-    model = AutoModelForImageClassification.from_pretrained(args.model_dir)
 
-    map_fn = partial(preprocess_batch, image_processor, args.output_name)
-    dataset = load_dataset("webdataset", data_dir=args.input, split=args.split, streaming=True)
+    model = AutoModelForImageClassification.from_pretrained(os.path.join(args.model_dir))
+    image_processor = AutoImageProcessor.from_pretrained(os.path.join(args.model_dir))
+
+    # Get the output name from the output_name.text file in the model directory
+
+    with open(os.path.join(args.model_dir, "output_name.txt"), "r", encoding="utf-8") as f:
+        output_name = f.read().strip()
+
+    map_fn = partial(preprocess_batch, image_processor, output_name)
+    dataset = load_dataset("webdataset", data_dir=args.dataset, split=args.split, streaming=True)
 
     dataset = dataset.map(map_fn, batched=True).select_columns(["label", "pixel_values"])
 
@@ -133,19 +142,13 @@ def get_args_parser():
     import argparse
 
     parser = argparse.ArgumentParser(description="Run inference on a trained model.")
-    parser.add_argument("--input", help="Path to the directory containing the dataset to load")
+    parser.add_argument("--dataset", help="Path to the directory containing the dataset to load")
     parser.add_argument("--output", help="Path to the directory to save the results")
     parser.add_argument("--batch-size", type=int, help="The batch size to use for evaluation", default=128)
     parser.add_argument("--split", help="Which dataset split to load.", default="test")
     parser.add_argument("--model-dir", help="Path to the directory containing the trained model.")
     parser.add_argument("--log", type=str, help="Log level", default="INFO")
     parser.add_argument("--log-file", type=str, help="Log file", default=None)
-    parser.add_argument(
-        "--output-name",
-        type=str,
-        help="The observation variable to train the netowrk to classify",
-        default="wind_speed_mps",
-    )
 
     return parser
 
