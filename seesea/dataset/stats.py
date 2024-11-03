@@ -98,3 +98,28 @@ if __name__ == "__main__":
         plt.ylabel("Frequency")
         plt.savefig(os.path.join(input_args.output, f"{key}_histogram.png"))
         plt.close()
+
+    # Create a dict of observations for each id
+    id_observations = {}
+    for obs in image_observations:
+        id_observations.setdefault(obs.observation.station_id, []).append(obs)
+
+    # Get the historgram for each id
+
+    for id, obs_list in id_observations.items():
+        for key in number_keys:
+            values = [getattr(obs.observation, key) for obs in obs_list]
+            # remove None values
+            values = [value for value in values if value is not None]
+            values = [value for value in values if not math.isnan(value)]
+
+            if len(values) == 0:
+                continue
+
+            # plot histogram
+            plt.hist(values, bins="auto")
+            plt.title(f"{key} Histogram for ID {id}")
+            plt.xlabel(key)
+            plt.ylabel("Frequency")
+            plt.savefig(os.path.join(input_args.output, f"{key}_histogram_id_{id}.png"))
+            plt.close()

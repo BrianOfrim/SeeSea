@@ -1,5 +1,5 @@
 """
-Train a continuous classification model using the Hugging Face Transformers library.
+Train a discrete classification model using the Hugging Face Transformers library.
 """
 
 import os
@@ -32,15 +32,27 @@ def augment_batch(augmentation: Callable, samples):
 def preprocess_batch(transform: Callable, label_key: str, samples):
     """Preprocess a batch of samples"""
     samples["pixel_values"] = transform(samples["jpg"])["pixel_values"]
-    samples["label"] = [obj[label_key] for obj in samples["json"]]
+
+    # convert the label to an integer in the range 0-14
+    samples["label"] = [max(0, min(14, int(obj[label_key]))) for obj in samples["json"]]
     return samples
 
 
-def compute_metrics(metric, eval_pred):
-    """Compute the metrics for the evaluation"""
+def compute_metrics(metrics_dict, eval_pred):
+    """Compute metrics using pre-loaded metric objects"""
     logits, labels = eval_pred
-    predictions = logits.squeeze()  # Get predictions from logits
-    return metric.compute(predictions=predictions, references=labels)
+    predictions = logits.argmax(axis=-1)
+
+    results = {}
+    for metric_name, metric in metrics_dict.items():
+        # For F1 score, explicitly set average to 'macro' for multiclass
+        if metric_name == "f1":
+            result = metric.compute(predictions=predictions, references=labels, average="macro")
+        else:
+            result = metric.compute(predictions=predictions, references=labels)
+        results[metric_name] = result[metric_name]
+
+    return results
 
 
 def main(args):
@@ -53,7 +65,7 @@ def main(args):
 
     image_processor = AutoImageProcessor.from_pretrained(args.model)
 
-    model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True, num_labels=1)
+    model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True, num_labels=15)
 
     augmentation = None
     if args.rotation is not None:
@@ -62,7 +74,7 @@ def main(args):
 
     map_fn = partial(preprocess_batch, image_processor, args.output_name)
 
-    num_training_samples = 65536
+    num_training_samples = 1000
     steps_per_epoch = num_training_samples // args.batch_size
     total_steps = steps_per_epoch * args.epochs
 
@@ -87,7 +99,7 @@ def main(args):
 
     data_collator = DefaultDataCollator()
 
-    mae_metric = evaluate.load("mae")
+    metrics_dict = {name: evaluate.load(name) for name in ["accuracy", "f1"]}
 
     training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
@@ -115,7 +127,7 @@ def main(args):
         data_collator=data_collator,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        compute_metrics=partial(compute_metrics, mae_metric),
+        compute_metrics=partial(compute_metrics, metrics_dict),
     )
 
     trainer.train()

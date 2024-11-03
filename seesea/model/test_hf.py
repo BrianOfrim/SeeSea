@@ -1,3 +1,7 @@
+"""
+Test a trained model using the Hugging Face Transformers library.
+"""
+
 import os
 from typing import Callable
 from functools import partial

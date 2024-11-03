@@ -1,3 +1,7 @@
+"""
+Visualize the output of a trained model using the Hugging Face Transformers library.
+"""
+
 import os
 import logging
 
@@ -52,6 +56,11 @@ def main(args):
 
         output = output.logits.squeeze()
 
+        error = output.item() - label
+
+        if args.min_error is not None and abs(error) < args.min_error:
+            continue
+
         # get original image brightness
         brightness = utils.get_brightness(image)
         sharpness = utils.get_sharpness(image)
@@ -67,7 +76,7 @@ def main(args):
 
         plt.suptitle(
             f"target: {label:.3f}, out: {output.item():.3f}, diff:"
-            f" {output.item() - label:.3f}, bright: {brightness:.2f}, sharp: {sharpness:.2f}"
+            f" {error:.3f}, bright: {brightness:.2f}, sharp: {sharpness:.2f}"
         )
 
         plt.show()
@@ -88,6 +97,9 @@ def get_args_parser():
     parser.add_argument("--log", type=str, help="Log level", default="INFO")
     parser.add_argument("--log-file", type=str, help="Log file", default=None)
     parser.add_argument("--num-samples", type=int, help="Number of samples to run inference on", default=None)
+    parser.add_argument(
+        "--min-error", type=float, help="Only show images with an error greater than this value", default=None
+    )
 
     return parser
 

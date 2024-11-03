@@ -1,6 +1,4 @@
-"""
-Train a continuous classification model using the Hugging Face Transformers library.
-"""
+"Training script for the SeeSea model."
 
 import os
 import logging
@@ -19,6 +17,8 @@ from transformers import (
     DefaultDataCollator,
 )
 import evaluate
+from torch import nn
+import torch
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,38 +29,74 @@ def augment_batch(augmentation: Callable, samples):
     return samples
 
 
-def preprocess_batch(transform: Callable, label_key: str, samples):
+def preprocess_batch(transform: Callable, label_keys: list, samples):
     """Preprocess a batch of samples"""
     samples["pixel_values"] = transform(samples["jpg"])["pixel_values"]
-    samples["label"] = [obj[label_key] for obj in samples["json"]]
+    samples["labels"] = [[obj[key] for key in label_keys] for obj in samples["json"]]
     return samples
 
 
 def compute_metrics(metric, eval_pred):
     """Compute the metrics for the evaluation"""
     logits, labels = eval_pred
-    predictions = logits.squeeze()  # Get predictions from logits
-    return metric.compute(predictions=predictions, references=labels)
+    predictions = logits
+    results = {}
+    # Individual MAEs for each output
+    for i in range(predictions.shape[1]):
+        results[f"mae_{i}"] = metric.compute(predictions=predictions[:, i], references=labels[:, i])["mae"]
+    # Overall MAE across all outputs
+    results["mae_overall"] = metric.compute(predictions=predictions.flatten(), references=labels.flatten())["mae"]
+    return results
+
+
+class MultiHeadModel(nn.Module):
+    def __init__(self, base_model, num_outputs):
+        super().__init__()
+        if num_outputs < 1:
+            raise ValueError("num_outputs must be at least 1")
+
+        self.base_model = base_model
+        hidden_size = base_model.classifier.in_features
+
+        # Add global average pooling
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        self.heads = nn.ModuleList([nn.Linear(hidden_size, 1) for _ in range(num_outputs)])
+
+    def forward(self, pixel_values, labels):
+        if labels is None:
+            raise ValueError("labels cannot be None")
+
+        features = self.base_model.base_model(pixel_values)[0]  # Shape: [batch_size, channels, height, width]
+        # Apply pooling and reshape
+        features = self.pool(features)  # Shape: [batch_size, channels, 1, 1]
+        features = features.flatten(1)  # Shape: [batch_size, channels]
+        logits = torch.cat([head(features) for head in self.heads], dim=1)
+
+        loss_fct = nn.MSELoss()
+        loss = loss_fct(logits, labels.float())
+
+        return loss, logits
 
 
 def main(args):
     """train the model"""
 
-    LOGGER.info("Training the model to classify %s", args.output_name)
+    LOGGER.info("Training the model to classify %s", args.output_names)
 
     if not os.path.exists(args.output):
         os.makedirs(args.output)
 
     image_processor = AutoImageProcessor.from_pretrained(args.model)
 
-    model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True, num_labels=1)
+    base_model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True)
+    model = MultiHeadModel(base_model, len(args.output_names))
 
     augmentation = None
     if args.rotation is not None:
         augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
         LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
 
-    map_fn = partial(preprocess_batch, image_processor, args.output_name)
+    map_fn = partial(preprocess_batch, image_processor, args.output_names)
 
     num_training_samples = 65536
     steps_per_epoch = num_training_samples // args.batch_size
@@ -81,9 +117,9 @@ def main(args):
     if augmentation is not None:
         train_ds = train_ds.map(partial(augment_batch, augmentation), batched=True)
 
-    train_ds = train_ds.map(map_fn, batched=True).select_columns(["label", "pixel_values"])
+    train_ds = train_ds.map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
 
-    val_ds = full_dataset["validation"].map(map_fn, batched=True).select_columns(["label", "pixel_values"])
+    val_ds = full_dataset["validation"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
 
     data_collator = DefaultDataCollator()
 
@@ -121,7 +157,7 @@ def main(args):
     trainer.train()
 
     # run the test set
-    test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["label", "pixel_values"])
+    test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
 
     test_result = trainer.predict(test_ds)
 
@@ -136,9 +172,9 @@ def main(args):
     image_processor.save_pretrained(model_ouput_dir)
 
     # save the output name
-    output_name_path = os.path.join(model_ouput_dir, "output_name.txt")
-    with open(output_name_path, "w", encoding="utf-8") as output_name_file:
-        output_name_file.write(args.output_name)
+    output_names_path = os.path.join(model_ouput_dir, "output_names.txt")
+    with open(output_names_path, "w", encoding="utf-8") as output_names_file:
+        output_names_file.write("\n".join(args.output_names))
 
 
 def get_args_parser():
@@ -154,10 +190,11 @@ def get_args_parser():
     parser.add_argument("--learning-rate", type=float, help="The learning rate to use for training", default=0.001)
     parser.add_argument("--model", type=str, help="The model to use for training", default="resnet18")
     parser.add_argument(
-        "--output-name",
+        "--output-names",
         type=str,
-        help="The observation variable to train the netowrk to classify",
-        default="wind_speed_mps",
+        nargs="+",
+        help="The observation variable(s) to train the network to classify",
+        required=True,
     )
     parser.add_argument(
         "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None

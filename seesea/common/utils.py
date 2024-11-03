@@ -83,6 +83,15 @@ def fetch_json(url, timeout=None):
     return response.json()
 
 
+def save_json(data, file_path):
+    """Save a json object to a file path"""
+    try:
+        with open(file_path, "w", encoding="utf-8") as file:
+            json.dump(data, file, indent=4)
+    except Exception as e:
+        LOGGER.warning("Failed to save json to %s due to %s", file_path, e)
+
+
 def load_json(file_path):
     """Load a json object from a file path"""
     try:
