@@ -4,12 +4,19 @@ A script to read images from the buoycam dataset and filter them based on bright
 
 import os
 import logging
-
+import json
 from typing import List, Tuple
 
 import numpy as np
 from seesea.common import utils
-from seesea.common.observation import Observation, ImageObservation, to_webdataset, get_all_image_observations
+from seesea.common.observation import (
+    Observation,
+    ImageObservation,
+    to_webdataset,
+    get_all_image_observations,
+    get_statistics,
+)
+from json import JSONEncoder
 
 
 LOGGER = logging.getLogger(__name__)
@@ -128,6 +135,13 @@ if __name__ == "__main__":
         )
         LOGGER.info("Number of images after filtering for brightness: %d", len(image_observations))
 
+    # Save the statistics to a file
+    statistics = get_statistics(image_observations)
+    with open(os.path.join(input_args.output, "statistics.json"), "w", encoding="utf-8") as f:
+        json.dump([stat.to_dict() for stat in statistics], f, indent=4)
+
+    LOGGER.info("Wrote statistics to %s", os.path.join(input_args.output, "statistics.json"))
+
     # Break up the filtered images into test, validation, and training sets
     np.random.shuffle(image_observations)
 
@@ -151,3 +165,7 @@ if __name__ == "__main__":
     training_path = os.path.join(input_args.output, "train")
     to_webdataset(training_image_observaitons, training_path)
     LOGGER.info("Wrote %d training image observations to %s", len(training_image_observaitons), training_path)
+
+    # Save split sizes to a file
+    with open(os.path.join(input_args.output, "split_sizes.json"), "w", encoding="utf-8") as f:
+        json.dump({"test": test_size, "validation": validation_size, "training": training_size}, f, indent=4)

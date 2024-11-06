@@ -3,6 +3,8 @@
 import os
 import logging
 import math
+from dataclasses import dataclass
+import json
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,6 +12,7 @@ import numpy as np
 from seesea.common.observation import Observation, get_all_image_observations
 
 LOGGER = logging.getLogger(__name__)
+
 
 if __name__ == "__main__":
     import argparse
@@ -57,6 +60,8 @@ if __name__ == "__main__":
     # filter out keys that are degrees
     # float_keys = [key for key in float_keys if not key.endswith("_deg")]
 
+    statistics = []
+
     # Get statistics for each float key
     for key in number_keys:
         values = [getattr(obs.observation, key) for obs in image_observations]
@@ -72,11 +77,18 @@ if __name__ == "__main__":
 
         values.sort()
 
-        LOGGER.info("\tMin: %f", np.min(values))
-        LOGGER.info("\tMax: %f", np.max(values))
-        LOGGER.info("\tMean: %f", np.mean(values))
-        LOGGER.info("\tMedian: %f", np.median(values))
-        LOGGER.info("\tStandard Deviation: %f", np.std(values))
+        stats = Statistic(
+            key=key,
+            min=np.min(values),
+            max=np.max(values),
+            mean=np.mean(values),
+            median=np.median(values),
+            std=np.std(values),
+        )
+
+        LOGGER.info(stats)
+
+        statistics.append(stats)
 
         # get all unique values
         unique_values = np.unique(values)
@@ -98,6 +110,10 @@ if __name__ == "__main__":
         plt.ylabel("Frequency")
         plt.savefig(os.path.join(input_args.output, f"{key}_histogram.png"))
         plt.close()
+
+    # write the statistics to a json file
+    with open(os.path.join(input_args.output, "statistics.json"), "w") as f:
+        json.dump([stat.__dict__ for stat in statistics], f)
 
     # Create a dict of observations for each id
     id_observations = {}

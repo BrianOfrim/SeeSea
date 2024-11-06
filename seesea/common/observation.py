@@ -2,10 +2,11 @@
 
 import os
 import math
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields
 from typing import List
 import re
 import copy
+import numpy as np
 
 from seesea.common import utils
 import webdataset as wds
@@ -56,6 +57,25 @@ class Observation:
 
     def to_dict(self):
         """Convert the observation to a dictionary"""
+        return asdict(self)
+
+
+@dataclass
+class ObservationStatistics:
+    """Contains statistical information about a numerical field in the dataset."""
+
+    key: str
+    min: float
+    max: float
+    mean: float
+    median: float
+    std: float
+
+    def __str__(self):
+        return f"{self.key}: {self.min} to {self.max}, mean: {self.mean}, median: {self.median}, std: {self.std}"
+
+    def to_dict(self):
+        """Convert the statistics to a dictionary"""
         return asdict(self)
 
 
@@ -126,3 +146,40 @@ def get_all_image_observations(input_dir: str) -> List[ImageObservation]:
             image_observations.append(ImageObservation(image_path, obs))
 
     return image_observations
+
+
+def get_statistics(
+    image_observations: List[ImageObservation], key_blacklist: List[str] = None
+) -> List[ObservationStatistics]:
+    """Get the statistics for the image observations"""
+
+    if len(image_observations) == 0:
+        return []
+
+    statistics = []
+
+    keys = [field.name for field in fields(Observation) if field.type == float or field.type == int and field.name]
+
+    if key_blacklist is not None:
+        keys = [key for key in keys if key not in key_blacklist]
+
+    for key in keys:
+
+        values = [getattr(obs.observation, key) for obs in image_observations]
+        values = [value for value in values if value is not None]
+        values = [value for value in values if not math.isnan(value)]
+
+        if len(values) == 0:
+            continue
+
+        stats = ObservationStatistics(
+            key=key,
+            min=np.min(values),
+            max=np.max(values),
+            mean=np.mean(values),
+            median=np.median(values),
+            std=np.std(values),
+        )
+        statistics.append(stats)
+
+    return statistics

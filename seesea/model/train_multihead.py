@@ -5,7 +5,7 @@ import logging
 from functools import partial
 import datetime
 from typing import Callable
-
+import json
 from torchvision import transforms
 from datasets import load_dataset
 
@@ -36,16 +36,16 @@ def preprocess_batch(transform: Callable, label_keys: list, samples):
     return samples
 
 
-def compute_metrics(metric, eval_pred):
+def compute_metrics(metric, output_names, eval_pred):
     """Compute the metrics for the evaluation"""
     logits, labels = eval_pred
     predictions = logits
     results = {}
     # Individual MAEs for each output
-    for i in range(predictions.shape[1]):
-        results[f"mae_{i}"] = metric.compute(predictions=predictions[:, i], references=labels[:, i])["mae"]
+    for i, name in enumerate(output_names):
+        results[f"mae_{name}"] = metric.compute(predictions=predictions[:, i], references=labels[:, i])["mae"]
     # Overall MAE across all outputs
-    results["mae_overall"] = metric.compute(predictions=predictions.flatten(), references=labels.flatten())["mae"]
+    results["mae"] = metric.compute(predictions=predictions.flatten(), references=labels.flatten())["mae"]
     return results
 
 
@@ -98,17 +98,19 @@ def main(args):
 
     map_fn = partial(preprocess_batch, image_processor, args.output_names)
 
-    num_training_samples = 65536
-    steps_per_epoch = num_training_samples // args.batch_size
-    total_steps = steps_per_epoch * args.epochs
-
-    LOGGER.debug(
-        "Training for %d epochs with %d steps per epoch. Batch size: %d,  Total steps: %d",
-        args.epochs,
-        steps_per_epoch,
-        args.batch_size,
-        total_steps,
-    )
+    # load the split sizes
+    if os.path.exists(os.path.join(args.input, "split_sizes.json")):
+        with open(os.path.join(args.input, "split_sizes.json"), "r", encoding="utf-8") as f:
+            split_sizes = json.load(f)
+        num_training_samples = split_sizes["training"]
+        LOGGER.info(
+            "Loaded split sizes from %s. Using %d training samples",
+            os.path.join(args.input, "split_sizes.json"),
+            num_training_samples,
+        )
+    else:
+        num_training_samples = 65536
+        LOGGER.info("No split sizes found, using %d training samples", num_training_samples)
 
     full_dataset = load_dataset("webdataset", data_dir=args.input, streaming=True)
 
@@ -122,6 +124,17 @@ def main(args):
     val_ds = full_dataset["validation"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
 
     data_collator = DefaultDataCollator()
+
+    steps_per_epoch = num_training_samples // args.batch_size
+    total_steps = steps_per_epoch * args.epochs
+
+    LOGGER.debug(
+        "Training for %d epochs with %d steps per epoch. Batch size: %d,  Total steps: %d",
+        args.epochs,
+        steps_per_epoch,
+        args.batch_size,
+        total_steps,
+    )
 
     mae_metric = evaluate.load("mae")
 
@@ -151,7 +164,7 @@ def main(args):
         data_collator=data_collator,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        compute_metrics=partial(compute_metrics, mae_metric),
+        compute_metrics=partial(compute_metrics, mae_metric, args.output_names),
     )
 
     trainer.train()
@@ -167,7 +180,9 @@ def main(args):
     model_ouput_dir = os.path.join(model_dir, "model")
     if not os.path.exists(model_ouput_dir):
         os.makedirs(model_ouput_dir)
-    model.save_pretrained(model_ouput_dir)
+    LOGGER.info(f"Saving complete model to {model_ouput_dir}")
+    torch.save(model, os.path.join(model_ouput_dir, "model.pt"))
+    LOGGER.info("Model saved successfully")
     # save the image processor
     image_processor.save_pretrained(model_ouput_dir)
 
