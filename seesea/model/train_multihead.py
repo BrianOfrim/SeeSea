@@ -50,17 +50,29 @@ def compute_metrics(metric, output_names, eval_pred):
 
 
 class MultiHeadModel(nn.Module):
-    def __init__(self, base_model, num_outputs):
+    def __init__(self, base_model, num_outputs, hidden_dim=512):
         super().__init__()
         if num_outputs < 1:
             raise ValueError("num_outputs must be at least 1")
 
         self.base_model = base_model
-        hidden_size = base_model.classifier.in_features
+        base_hidden_size = base_model.classifier.in_features
 
         # Add global average pooling
         self.pool = nn.AdaptiveAvgPool2d((1, 1))
-        self.heads = nn.ModuleList([nn.Linear(hidden_size, 1) for _ in range(num_outputs)])
+
+        # Add shared MLP layers before heads
+        self.shared_layers = nn.Sequential(
+            nn.Linear(base_hidden_size, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.Linear(hidden_dim, hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+        )
+
+        # Regression heads now take input from the shared layers
+        self.heads = nn.ModuleList([nn.Linear(hidden_dim // 2, 1) for _ in range(num_outputs)])
 
     def forward(self, pixel_values, labels):
         if labels is None:
@@ -70,7 +82,10 @@ class MultiHeadModel(nn.Module):
         # Apply pooling and reshape
         features = self.pool(features)  # Shape: [batch_size, channels, 1, 1]
         features = features.flatten(1)  # Shape: [batch_size, channels]
-        logits = torch.cat([head(features) for head in self.heads], dim=1)
+
+        # Pass through shared layers
+        shared_features = self.shared_layers(features)
+        logits = torch.cat([head(shared_features) for head in self.heads], dim=1)
 
         loss_fct = nn.MSELoss()
         loss = loss_fct(logits, labels.float())
