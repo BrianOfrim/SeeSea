@@ -77,7 +77,8 @@ def main(args):
         plt.axis("off")
 
         # Create subtitle with all predictions
-        subtitle = f"bright: {brightness:.2f}, sharp: {sharpness:.2f}\n"
+        # subtitle = f"bright: {brightness:.2f}, sharp: {sharpness:.2f}\n"
+        subtitle = ""
         for name, pred, target, error in zip(output_names, outputs, labels, errors):
             subtitle += f"{name} - target: {target:.3f}, pred: {pred:.3f}, diff: {error:.3f}\n"
 
