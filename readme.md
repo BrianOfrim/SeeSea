@@ -29,7 +29,7 @@ Overall (All regression heads combined):
 
 These results were achieved with the following training script input:
 ```
-python -m seesea.model.train_multihead --log DEBUG --input /Volumes/external/NOAA_buoycams --output /Volumes/external/seesea/train --batch-size 64 --model "microsoft/resnet-50" --epochs 50 --learning-rate 0.0005 --output-names wind_speed_mps wave_height_m --rotation 12
+python -m seesea.model.train --log DEBUG --input /Volumes/external/NOAA_buoycams --output /Volumes/external/seesea/train --batch-size 64 --model "microsoft/resnet-50" --epochs 50 --learning-rate 0.0005 --output-names wind_speed_mps wave_height_m --rotation 12
 ```
 Current best known hyperperameters:
 - Backbone pretrained image classification model: ResNet-50

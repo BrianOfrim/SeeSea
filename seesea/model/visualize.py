@@ -1,51 +1,32 @@
-"""Run inference on a trained model."""
+"""
+Visualize the outputs of the multihead model
+"""
 
 import os
 import logging
 
-import torch
-import matplotlib.pyplot as plt
 from datasets import load_dataset
+import torch
+from transformers import AutoImageProcessor
+import matplotlib.pyplot as plt
 
 from seesea.common import utils
-from seesea.model import engine
-from seesea.model.training_results import TrainingResults
+
+from seesea.model.multihead import MultiHeadModel  # Import the model class
 
 LOGGER = logging.getLogger(__name__)
 
 
 def main(args):
+    # Load model and processor
+    model = torch.load(os.path.join(args.model_dir, "model.pt"))
+    image_processor = AutoImageProcessor.from_pretrained(os.path.join(args.model_dir))
 
-    # Verify the input directory exists, contains the training, details and the model weights
+    # Get output names
+    with open(os.path.join(args.model_dir, "output_names.txt"), "r", encoding="utf-8") as f:
+        output_names = f.read().strip().split("\n")
 
-    if not os.path.exists(args.model_dir):
-        LOGGER.error("Input directory %s does not exist.", args.model_dir)
-        return
-
-    training_details_path = os.path.join(args.model_dir, "training_details.json")
-    if not os.path.exists(training_details_path):
-        LOGGER.error("Training details file %s does not exist.", training_details_path)
-        return
-
-    # Load the training details and the model weights
-    training_details_json = utils.load_json(training_details_path)
-    if training_details_json is None:
-        LOGGER.error("Failed to load training details from %s", training_details_path)
-        return
-
-    model_weights_path = os.path.join(args.model_dir, "model.pth")
-    if not os.path.exists(model_weights_path):
-        LOGGER.error("Model weights file %s does not exist.", model_weights_path)
-        return
-
-    training_details = utils.from_dict(TrainingResults, training_details_json)
-
-    LOGGER.debug("Loaded training details: %s", training_details)
-
-    model, transform = engine.continuous_single_output_model_factory(training_details.model, model_weights_path)
-
-    eval_ds = load_dataset("webdataset", data_dir=args.input, split=args.split, streaming=True)
-    eval_ds = eval_ds.shuffle()
+    dataset = load_dataset("webdataset", data_dir=args.dataset, split=args.split, streaming=True).shuffle()
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -55,72 +36,80 @@ def main(args):
         device = torch.device("cpu")
 
     model = model.to(device)
-
-    # Run inference on the dataset
     model.eval()
 
-    LOGGER.info("Running inference on the dataset to classify %s", training_details.output_name)
+    LOGGER.info("Running inference on the dataset to classify %s", output_names)
 
     count = 0
 
-    with torch.no_grad():
-        for samlple in eval_ds:
+    for sample in dataset:
+        image = sample["jpg"]
+        labels = [sample["json"][name] for name in output_names]
+        image_name = sample["__key__"]
 
-            image = samlple["jpg"]
-            label = samlple["json"]
-            name = samlple["__key__"]
-            tranformed_image = transform(image).unsqueeze(0).to(device)
+        transformed_image = image_processor(image, return_tensors="pt")
+        transformed_image = transformed_image["pixel_values"]
+        transformed_image = transformed_image.to(device)
 
-            target = label[training_details.output_name]
+        with torch.no_grad():
+            _, outputs = model(transformed_image, torch.tensor([labels]).to(device))
 
-            output = model(tranformed_image)
+        outputs = outputs.squeeze().cpu().numpy()
+        errors = outputs - labels
 
-            # get original image brightness
-            brightness = utils.get_brightness(image)
-            sharpness = utils.get_sharpness(image)
-            dropplets = utils.detect_water_droplets(image)
+        # Skip if all errors are below min_error threshold
+        if args.min_error is not None and all(abs(e) < args.min_error for e in errors):
+            continue
 
-            LOGGER.info(
-                "%s: Predicted: %f, Expected: %f, Diff: %f", name, output.item(), target, output.item() - target
-            )
+        # Get image quality metrics
+        brightness = utils.get_brightness(image)
+        sharpness = utils.get_sharpness(image)
+        droplets = utils.detect_water_droplets(image)
 
-            LOGGER.debug("Brightness: %f, Sharpness: %f, Dropplets %s", brightness, sharpness, dropplets)
+        LOGGER.info("%s:", image_name)
+        for name, pred, target, error in zip(output_names, outputs, labels, errors):
+            LOGGER.info("  %s: Predicted: %f, Expected: %f, Diff: %f", name, pred, target, error)
 
-            plt.imshow(image)
-            plt.title(f"Image: {name} {training_details.output_name}")
-            plt.axis("off")
+        LOGGER.debug("Brightness: %f, Sharpness: %f, Droplets: %s", brightness, sharpness, droplets)
 
-            plt.suptitle(
-                f"target: {target:.3f}, out: {output.item():.3f}, diff:"
-                f" {output.item() - target:.3f}, bright: {brightness:.2f}, sharp: {sharpness:.2f}"
-            )
+        plt.imshow(image)
+        plt.title(f"Image: {image_name}")
+        plt.axis("off")
 
-            plt.show()
+        # Create subtitle with all predictions
+        # subtitle = f"bright: {brightness:.2f}, sharp: {sharpness:.2f}\n"
+        subtitle = ""
+        for name, pred, target, error in zip(output_names, outputs, labels, errors):
+            subtitle += f"{name} - target: {target:.3f}, pred: {pred:.3f}, diff: {error:.3f}\n"
 
-            count += 1
+        plt.suptitle(subtitle)
+        plt.show()
 
-            if count == args.num_samples:
-                break
+        count += 1
+
+        if args.num_samples is not None and count == args.num_samples:
+            break
 
 
 def get_args_parser():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Run inference on a trained model.")
-    parser.add_argument("--input", help="Path to the directory containing the dataset to load")
+    parser = argparse.ArgumentParser(description="Run inference on a trained multihead model.")
+    parser.add_argument("--dataset", help="Path to the directory containing the dataset to load")
     parser.add_argument("--split", help="Which dataset split to load.", default="test")
     parser.add_argument("--model-dir", help="Path to the directory containing the trained model.")
     parser.add_argument("--log", type=str, help="Log level", default="INFO")
     parser.add_argument("--log-file", type=str, help="Log file", default=None)
     parser.add_argument("--num-samples", type=int, help="Number of samples to run inference on", default=None)
+    parser.add_argument(
+        "--min-error", type=float, help="Only show images with an error greater than this value", default=None
+    )
 
     return parser
 
 
 if __name__ == "__main__":
-
     parser = get_args_parser()
-
     args = parser.parse_args()
 
     # setup the loggers

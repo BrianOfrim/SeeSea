@@ -2,151 +2,165 @@
 
 import os
 import logging
-import datetime
-import json
-
 from functools import partial
-
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
+import datetime
+from typing import Callable
+import json
 from torchvision import transforms
-from torch.optim.lr_scheduler import OneCycleLR
 from datasets import load_dataset
-import matplotlib.pyplot as plt
 
-import seesea.common.utils as utils
-from seesea.model.training_results import TrainingResults
-from seesea.model import engine
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    TrainingArguments,
+    Trainer,
+    DefaultDataCollator,
+)
+import evaluate
+import torch
+from seesea.model.multihead import MultiHeadModel
 
 LOGGER = logging.getLogger(__name__)
+
+
+def augment_batch(augmentation: Callable, samples):
+    """Preprocess a batch of samples"""
+    samples["jpg"] = [augmentation(jpg) for jpg in samples["jpg"]]
+    return samples
+
+
+def preprocess_batch(transform: Callable, label_keys: list, samples):
+    """Preprocess a batch of samples"""
+    samples["pixel_values"] = transform(samples["jpg"])["pixel_values"]
+    samples["labels"] = [[obj[key] for key in label_keys] for obj in samples["json"]]
+    return samples
+
+
+def compute_metrics(metric, output_names, eval_pred):
+    """Compute the metrics for the evaluation"""
+    logits, labels = eval_pred
+    predictions = logits
+    results = {}
+    # Individual MAEs for each output
+    for i, name in enumerate(output_names):
+        results[f"mae_{name}"] = metric.compute(predictions=predictions[:, i], references=labels[:, i])["mae"]
+    # Overall MAE across all outputs
+    results["mae"] = metric.compute(predictions=predictions.flatten(), references=labels.flatten())["mae"]
+    return results
 
 
 def main(args):
     """train the model"""
 
-    LOGGER.info("Training the model to classify %s", args.output_name)
+    LOGGER.info("Training the model to classify %s", args.output_names)
 
     if not os.path.exists(args.output):
         os.makedirs(args.output)
 
-    model, base_transform = engine.continuous_single_output_model_factory(args.model)
+    image_processor = AutoImageProcessor.from_pretrained(args.model)
 
-    train_transform = base_transform
+    base_model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True)
+    model = MultiHeadModel(base_model, len(args.output_names))
 
+    augmentation = None
     if args.rotation is not None:
-        train_transform = transforms.Compose(
-            [
-                transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR),
-                train_transform,
-            ]
-        )
+        augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
         LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
 
-    train_map_fn = partial(engine.preprocess, train_transform, args.output_name)
-    validation_map_fn = partial(engine.preprocess, base_transform, args.output_name)
+    map_fn = partial(preprocess_batch, image_processor, args.output_names)
 
-    train_ds = (
-        load_dataset("webdataset", data_dir=args.input, split="train", streaming=True).shuffle().map(train_map_fn)
-    )
-    val_ds = load_dataset("webdataset", data_dir=args.input, split="validation", streaming=True).map(validation_map_fn)
-
-    train_loader = DataLoader(train_ds, collate_fn=engine.collate, batch_size=args.batch_size)
-    val_loader = DataLoader(val_ds, collate_fn=engine.collate, batch_size=args.batch_size)
-
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-    elif torch.backends.mps.is_available():
-        device = torch.device("mps")
+    # load the split sizes
+    if os.path.exists(os.path.join(args.input, "split_sizes.json")):
+        with open(os.path.join(args.input, "split_sizes.json"), "r", encoding="utf-8") as f:
+            split_sizes = json.load(f)
+        num_training_samples = split_sizes["training"]
+        LOGGER.info(
+            "Loaded split sizes from %s. Using %d training samples",
+            os.path.join(args.input, "split_sizes.json"),
+            num_training_samples,
+        )
     else:
-        device = torch.device("cpu")
+        num_training_samples = 65536
+        LOGGER.info("No split sizes found, using %d training samples", num_training_samples)
 
-    model = model.to(device)
+    full_dataset = load_dataset("webdataset", data_dir=args.input, streaming=True)
 
-    # Loss Function and Optimizer
-    criterion = nn.MSELoss()
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.learning_rate)
-    # step scheduler
-    # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=6, gamma=0.1)
-    # schuduler = OneCycleLR(optimizer, max_lr=args.learning_rate, epochs=args.epochs, steps_per_epoch=len(train_loader))
+    train_ds = full_dataset["train"].take(num_training_samples).shuffle()
+
+    if augmentation is not None:
+        train_ds = train_ds.map(partial(augment_batch, augmentation), batched=True)
+
+    train_ds = train_ds.map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+
+    val_ds = full_dataset["validation"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+
+    data_collator = DefaultDataCollator()
+
+    steps_per_epoch = num_training_samples // args.batch_size
+    total_steps = steps_per_epoch * args.epochs
+
+    LOGGER.debug(
+        "Training for %d epochs with %d steps per epoch. Batch size: %d,  Total steps: %d",
+        args.epochs,
+        steps_per_epoch,
+        args.batch_size,
+        total_steps,
+    )
+
+    mae_metric = evaluate.load("mae")
 
     training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
     timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
     model_dir = os.path.join(args.output, timestamp_str)
-    model_filepath = os.path.join(model_dir, "model.pth")
 
-    train_losses = []
-    val_losses = []
-
-    min_loss = float("inf")
-
-    # Training Loop
-    for epoch in range(args.epochs):
-
-        LOGGER.debug("Starting epoch %d/%d", epoch + 1, args.epochs)
-        # Training Phase
-        epoch_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
-        epoch_loss = engine.train_one_epoch(model, criterion, optimizer, train_loader, device, None)
-        train_losses.append(epoch_loss)
-        LOGGER.info(
-            "Epoch %d/%d, Training Loss: %.4f, time: %s",
-            epoch + 1,
-            args.epochs,
-            epoch_loss,
-            datetime.datetime.now(tz=datetime.timezone.utc) - epoch_start_time,
-        )
-
-        # Validation Phase
-        val_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
-        val_epoch_loss = engine.evaluate_model(model, criterion, val_loader, device)
-        val_losses.append(val_epoch_loss)
-        LOGGER.info(
-            "Epoch %d/%d, Validation Loss: %.4f, time: %s",
-            epoch + 1,
-            args.epochs,
-            val_epoch_loss,
-            datetime.datetime.now(tz=datetime.timezone.utc) - val_start_time,
-        )
-
-        if val_epoch_loss < min_loss:
-            if not os.path.exists(model_dir):
-                os.mkdir(model_dir)
-            min_loss = val_epoch_loss
-            LOGGER.info("New best model found. Saving model to %s", model_filepath)
-            torch.save(model.state_dict(), model_filepath)
-
-    training_end_time = datetime.datetime.now(tz=datetime.timezone.utc)
-    LOGGER.info("Training complete. Training time: %s", training_end_time - training_start_time)
-
-    # Save the model
-
-    # Plot the training and validation loss
-    plt.plot(train_losses, label="Training Loss")
-    plt.plot(val_losses, label="Validation Loss")
-    plt.xlabel("Epoch")
-    plt.ylabel("Loss")
-    plt.legend()
-
-    loss_plot_filepath = os.path.join(model_dir, "loss_plot.png")
-    plt.savefig(loss_plot_filepath)
-
-    training_details = TrainingResults(
-        model=args.model,
-        output_name=args.output_name,
-        epochs=args.epochs,
-        batch_size=args.batch_size,
+    training_args = TrainingArguments(
+        output_dir=model_dir,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        save_total_limit=1,
         learning_rate=args.learning_rate,
-        training_start_time=training_start_time.isoformat(),
-        training_end_time=training_end_time.isoformat(),
-        train_losses=train_losses,
-        val_losses=val_losses,
+        lr_scheduler_type="linear",
+        warmup_ratio=args.warmup_ratio,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        logging_strategy="steps",
+        logging_steps=50,
+        max_steps=total_steps,
     )
 
-    with open(os.path.join(model_dir, "training_details.json"), "w", encoding="utf-8") as f:
-        json.dump(training_details.to_dict(), f, indent=4)
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        data_collator=data_collator,
+        train_dataset=train_ds,
+        eval_dataset=val_ds,
+        compute_metrics=partial(compute_metrics, mae_metric, args.output_names),
+    )
 
-    LOGGER.info("Output saved to %s", model_dir)
+    trainer.train()
+
+    # run the test set
+    test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+
+    test_result = trainer.predict(test_ds)
+
+    LOGGER.info("Test results: %s", test_result)
+
+    # save the model
+    model_ouput_dir = os.path.join(model_dir, "model")
+    if not os.path.exists(model_ouput_dir):
+        os.makedirs(model_ouput_dir)
+    LOGGER.info(f"Saving complete model to {model_ouput_dir}")
+    torch.save(model, os.path.join(model_ouput_dir, "model.pt"))
+    LOGGER.info("Model saved successfully")
+    # save the image processor
+    image_processor.save_pretrained(model_ouput_dir)
+
+    # save the output name
+    output_names_path = os.path.join(model_ouput_dir, "output_names.txt")
+    with open(output_names_path, "w", encoding="utf-8") as output_names_file:
+        output_names_file.write("\n".join(args.output_names))
 
 
 def get_args_parser():
@@ -162,15 +176,16 @@ def get_args_parser():
     parser.add_argument("--learning-rate", type=float, help="The learning rate to use for training", default=0.001)
     parser.add_argument("--model", type=str, help="The model to use for training", default="resnet18")
     parser.add_argument(
-        "--output-name",
+        "--output-names",
         type=str,
-        help="The observation variable to train the netowrk to classify",
-        default="wind_speed_mps",
+        nargs="+",
+        help="The observation variable(s) to train the network to classify",
+        required=True,
     )
-    parser.add_argument("--model-path", type=str, help="The path to save the trained model", default="model.pth")
     parser.add_argument(
         "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
     )
+    parser.add_argument("--warmup-ratio", type=float, help="The ratio of steps to use for warmup", default=0.1)
     return parser
 
 
