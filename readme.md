@@ -40,16 +40,28 @@ Current best known hyperperameters:
 
 ## Sample output
 
-![Z10A_2024_10_11_1110_0](readme_assets/Z10A_2024_10_11_1110_0_vis.png)
-![Z67A_2024_10_06_0110_3](readme_assets/Z67A_2024_10_06_0110_3_vis.png)
-![W11A_2024_10_04_2210_3](readme_assets/W11A_2024_10_04_2210_3_vis.png)
-![Z25A_2024_09_26_1810_3](readme_assets/Z25A_2024_09_26_1810_3_vis.png)
-![W31A_2024_10_02_0410_5](readme_assets/W31A_2024_10_02_0410_5_vis.png)
-![W38A_2024_09_26_1818_1](readme_assets/W38A_2024_09_26_1818_1_vis.png)
-![W64A_2024_09_19_1710_0](readme_assets/W64A_2024_09_19_1710_0_vis.png)
-![W81A_2024_09_21_1910_3](readme_assets/W81A_2024_09_21_1910_3_vis.png)
-![Z27A_2024_09_18_2110_5](readme_assets/Z27A_2024_09_18_2110_5_vis.png)
-![W92A_2024_10_11_1410_0](readme_assets/W92A_2024_10_11_1410_0_vis.png)
+<table>
+<tr>
+<td><img src="readme_assets/Z10A_2024_10_11_1110_0_vis.png"/></td>
+<td><img src="readme_assets/Z67A_2024_10_06_0110_3_vis.png"/></td>
+</tr>
+<tr>
+<td><img src="readme_assets/W11A_2024_10_04_2210_3_vis.png"/></td>
+<td><img src="readme_assets/Z25A_2024_09_26_1810_3_vis.png"/></td>
+</tr>
+<tr>
+<td><img src="readme_assets/W31A_2024_10_02_0410_5_vis.png"/></td>
+<td><img src="readme_assets/W38A_2024_09_26_1818_1_vis.png"/></td>
+</tr>
+<tr>
+<td><img src="readme_assets/W64A_2024_09_19_1710_0_vis.png"/></td>
+<td><img src="readme_assets/W81A_2024_09_21_1910_3_vis.png"/></td>
+</tr>
+<tr>
+<td><img src="readme_assets/Z27A_2024_09_18_2110_5_vis.png"/></td>
+<td><img src="readme_assets/W92A_2024_10_11_1410_0_vis.png"/></td>
+</tr>
+</table>
 
 #### Other potential data sources
 Great Lakes Environmental Research Labs webcam images: 
