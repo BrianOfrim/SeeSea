@@ -1,0 +1,248 @@
+"""Train a model to classify Beaufort sea states"""
+
+import os
+import logging
+from functools import partial
+import datetime
+from typing import Callable
+import json
+
+import numpy as np
+from torchvision import transforms
+from datasets import load_dataset
+
+from transformers import (
+    AutoImageProcessor,
+    AutoModelForImageClassification,
+    TrainingArguments,
+    Trainer,
+    DefaultDataCollator,
+)
+import evaluate
+import torch
+
+LOGGER = logging.getLogger(__name__)
+
+
+def mps_to_beaufort(wind_speed):
+    """
+    Convert wind speed from meters per second to Beaufort scale
+
+    Args:
+        wind_speed (float): Wind speed in meters per second
+
+    Returns:
+        int: Beaufort scale number (0-12)
+    """
+    if wind_speed < 0.5:
+        return 0  # Calm
+    elif wind_speed < 1.5:
+        return 1  # Light air
+    elif wind_speed < 3.3:
+        return 2  # Light breeze
+    elif wind_speed < 5.5:
+        return 3  # Gentle breeze
+    elif wind_speed < 7.9:
+        return 4  # Moderate breeze
+    elif wind_speed < 10.7:
+        return 5  # Fresh breeze
+    elif wind_speed < 13.8:
+        return 6  # Strong breeze
+    elif wind_speed < 17.1:
+        return 7  # Near gale
+    elif wind_speed < 20.7:
+        return 8  # Gale
+    elif wind_speed < 24.4:
+        return 9  # Strong gale
+    elif wind_speed < 28.4:
+        return 10  # Storm
+    elif wind_speed < 32.6:
+        return 11  # Violent storm
+    else:
+        return 12  # Hurricane force
+
+
+def augment_batch(augmentation: Callable, samples):
+    """Preprocess a batch of samples"""
+    samples["jpg"] = [augmentation(jpg) for jpg in samples["jpg"]]
+    return samples
+
+
+def preprocess_batch(transform: Callable, samples):
+    """Preprocess a batch of samples"""
+    samples["pixel_values"] = transform(samples["jpg"])["pixel_values"]
+    samples["labels"] = [mps_to_beaufort(obj["wind_speed_mps"]) for obj in samples["json"]]
+    return samples
+
+
+def compute_metrics(metric, eval_pred):
+    predictions, labels = eval_pred
+    predictions = np.argmax(predictions, axis=1)
+    return metric.compute(predictions=predictions, references=labels)
+
+
+def main(args):
+    """train the model"""
+
+    if not os.path.exists(args.output):
+        os.makedirs(args.output)
+
+    image_processor = AutoImageProcessor.from_pretrained(args.model)
+
+    # Add Beaufort scale mappings
+    id2label = {
+        0: "Calm",
+        1: "Light air",
+        2: "Light breeze",
+        3: "Gentle breeze",
+        4: "Moderate breeze",
+        5: "Fresh breeze",
+        6: "Strong breeze",
+        7: "Near gale",
+        8: "Gale",
+        9: "Strong gale",
+        10: "Storm",
+        11: "Violent storm",
+        12: "Hurricane force",
+    }
+    label2id = {v: k for k, v in id2label.items()}
+
+    model = AutoModelForImageClassification.from_pretrained(
+        args.model, id2label=id2label, label2id=label2id, num_labels=len(id2label), ignore_mismatched_sizes=True
+    )
+
+    augmentation = None
+    if args.rotation is not None:
+        augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
+        LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
+
+    map_fn = partial(preprocess_batch, image_processor)
+
+    if os.path.exists(os.path.join(args.input, "split_sizes.json")):
+        with open(os.path.join(args.input, "split_sizes.json"), "r", encoding="utf-8") as f:
+            split_sizes = json.load(f)
+        num_training_samples = split_sizes["training"]
+        LOGGER.info(
+            "Loaded split sizes from %s. Using %d training samples",
+            os.path.join(args.input, "split_sizes.json"),
+            num_training_samples,
+        )
+    else:
+        num_training_samples = 65536
+        LOGGER.info("No split sizes found, using %d training samples", num_training_samples)
+
+    full_dataset = load_dataset("webdataset", data_dir=args.input, streaming=True)
+
+    train_ds = full_dataset["train"].take(num_training_samples).shuffle()
+
+    if augmentation is not None:
+        train_ds = train_ds.map(partial(augment_batch, augmentation), batched=True)
+
+    train_ds = train_ds.map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+
+    val_ds = full_dataset["validation"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+
+    data_collator = DefaultDataCollator()
+
+    steps_per_epoch = num_training_samples // args.batch_size
+    total_steps = steps_per_epoch * args.epochs
+
+    LOGGER.debug(
+        "Training for %d epochs with %d steps per epoch. Batch size: %d,  Total steps: %d",
+        args.epochs,
+        steps_per_epoch,
+        args.batch_size,
+        total_steps,
+    )
+
+    accuracy = evaluate.load("accuracy")
+
+    training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
+
+    timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
+    model_dir = os.path.join(args.output, timestamp_str)
+
+    training_args = TrainingArguments(
+        output_dir=model_dir,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        save_total_limit=1,
+        learning_rate=args.learning_rate,
+        lr_scheduler_type="linear",
+        warmup_ratio=args.warmup_ratio,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        logging_strategy="steps",
+        logging_steps=50,
+        max_steps=total_steps,
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        data_collator=data_collator,
+        train_dataset=train_ds,
+        eval_dataset=val_ds,
+        compute_metrics=partial(compute_metrics, accuracy),
+    )
+
+    trainer.train()
+
+    # run the test set
+    test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+
+    test_result = trainer.predict(test_ds)
+
+    LOGGER.info("Test results: %s", test_result)
+
+    # save the model
+    model_ouput_dir = os.path.join(model_dir, "model")
+    if not os.path.exists(model_ouput_dir):
+        os.makedirs(model_ouput_dir)
+    LOGGER.info(f"Saving complete model to {model_ouput_dir}")
+    torch.save(model, os.path.join(model_ouput_dir, "model.pt"))
+    LOGGER.info("Model saved successfully")
+
+    # save the image processor
+    image_processor.save_pretrained(model_ouput_dir)
+
+
+def get_args_parser():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Train the SeeSea model")
+    parser.add_argument("--input", help="The directory containing the training data", default="data")
+    parser.add_argument("--output", help="The directory to write the output files to", default="data/train")
+    parser.add_argument("--log", type=str, help="Log level", default="INFO")
+    parser.add_argument("--log-file", type=str, help="Log file", default=None)
+    parser.add_argument("--epochs", type=int, help="The number of epochs to train for", default=30)
+    parser.add_argument("--batch-size", type=int, help="The batch size to use for training", default=32)
+    parser.add_argument("--learning-rate", type=float, help="The learning rate to use for training", default=0.001)
+    parser.add_argument("--model", type=str, help="The model to use for training", default="resnet18")
+    parser.add_argument(
+        "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
+    )
+    parser.add_argument("--warmup-ratio", type=float, help="The ratio of steps to use for warmup", default=0.1)
+    return parser
+
+
+if __name__ == "__main__":
+
+    parser = get_args_parser()
+
+    args = parser.parse_args()
+
+    # setup the loggers
+    LOGGER.setLevel(args.log)
+
+    log_formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    console_logging_handler = logging.StreamHandler()
+    console_logging_handler.setFormatter(log_formatter)
+    LOGGER.addHandler(console_logging_handler)
+
+    if args.log_file is not None:
+        file_logging_handler = logging.FileHandler(args.log_file)
+        file_logging_handler.setFormatter(log_formatter)
+        LOGGER.addHandler(file_logging_handler)
+
+    main(args)
