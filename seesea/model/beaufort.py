@@ -3,6 +3,23 @@
 from typing import Callable
 
 
+BeaufortRanges = [
+    (0, 0.5),  # Calm
+    (0.5, 1.5),  # Light air
+    (1.5, 3.3),  # Light breeze
+    (3.3, 5.5),  # Gentle breeze
+    (5.5, 7.9),  # Moderate breeze
+    (7.9, 10.7),  # Fresh breeze
+    (10.7, 13.8),  # Strong breeze
+    (13.8, 17.1),  # Near gale
+    (17.1, 20.7),  # Gale
+    (20.7, 24.4),  # Strong gale
+    (24.4, 28.4),  # Storm
+    (28.4, 32.6),  # Violent storm
+    (32.6, float("inf")),  # Hurricane force
+]
+
+
 def mps_to_beaufort(wind_speed):
     """
     Convert wind speed from meters per second to Beaufort scale
@@ -13,32 +30,11 @@ def mps_to_beaufort(wind_speed):
     Returns:
         int: Beaufort scale number (0-12)
     """
-    if wind_speed < 0.5:
-        return 0  # Calm
-    elif wind_speed < 1.5:
-        return 1  # Light air
-    elif wind_speed < 3.3:
-        return 2  # Light breeze
-    elif wind_speed < 5.5:
-        return 3  # Gentle breeze
-    elif wind_speed < 7.9:
-        return 4  # Moderate breeze
-    elif wind_speed < 10.7:
-        return 5  # Fresh breeze
-    elif wind_speed < 13.8:
-        return 6  # Strong breeze
-    elif wind_speed < 17.1:
-        return 7  # Near gale
-    elif wind_speed < 20.7:
-        return 8  # Gale
-    elif wind_speed < 24.4:
-        return 9  # Strong gale
-    elif wind_speed < 28.4:
-        return 10  # Storm
-    elif wind_speed < 32.6:
-        return 11  # Violent storm
-    else:
-        return 12  # Hurricane force
+    for i, (lower, upper) in enumerate(BeaufortRanges):
+        if lower <= wind_speed < upper:
+            return i
+    assert False, "Wind speed out of range somehow"
+    return len(BeaufortRanges) - 1
 
 
 id2label_beaufort = {
