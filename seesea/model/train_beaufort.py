@@ -18,60 +18,17 @@ from transformers import (
     Trainer,
     DefaultDataCollator,
 )
+
 import evaluate
 import torch
+from seesea.model.beaufort import id2label_beaufort, label2id_beaufort, preprocess_batch_beaufort
 
 LOGGER = logging.getLogger(__name__)
-
-
-def mps_to_beaufort(wind_speed):
-    """
-    Convert wind speed from meters per second to Beaufort scale
-
-    Args:
-        wind_speed (float): Wind speed in meters per second
-
-    Returns:
-        int: Beaufort scale number (0-12)
-    """
-    if wind_speed < 0.5:
-        return 0  # Calm
-    elif wind_speed < 1.5:
-        return 1  # Light air
-    elif wind_speed < 3.3:
-        return 2  # Light breeze
-    elif wind_speed < 5.5:
-        return 3  # Gentle breeze
-    elif wind_speed < 7.9:
-        return 4  # Moderate breeze
-    elif wind_speed < 10.7:
-        return 5  # Fresh breeze
-    elif wind_speed < 13.8:
-        return 6  # Strong breeze
-    elif wind_speed < 17.1:
-        return 7  # Near gale
-    elif wind_speed < 20.7:
-        return 8  # Gale
-    elif wind_speed < 24.4:
-        return 9  # Strong gale
-    elif wind_speed < 28.4:
-        return 10  # Storm
-    elif wind_speed < 32.6:
-        return 11  # Violent storm
-    else:
-        return 12  # Hurricane force
 
 
 def augment_batch(augmentation: Callable, samples):
     """Preprocess a batch of samples"""
     samples["jpg"] = [augmentation(jpg) for jpg in samples["jpg"]]
-    return samples
-
-
-def preprocess_batch(transform: Callable, samples):
-    """Preprocess a batch of samples"""
-    samples["pixel_values"] = transform(samples["jpg"])["pixel_values"]
-    samples["labels"] = [mps_to_beaufort(obj["wind_speed_mps"]) for obj in samples["json"]]
     return samples
 
 
@@ -89,26 +46,12 @@ def main(args):
 
     image_processor = AutoImageProcessor.from_pretrained(args.model)
 
-    # Add Beaufort scale mappings
-    id2label = {
-        0: "Calm",
-        1: "Light air",
-        2: "Light breeze",
-        3: "Gentle breeze",
-        4: "Moderate breeze",
-        5: "Fresh breeze",
-        6: "Strong breeze",
-        7: "Near gale",
-        8: "Gale",
-        9: "Strong gale",
-        10: "Storm",
-        11: "Violent storm",
-        12: "Hurricane force",
-    }
-    label2id = {v: k for k, v in id2label.items()}
-
     model = AutoModelForImageClassification.from_pretrained(
-        args.model, id2label=id2label, label2id=label2id, num_labels=len(id2label), ignore_mismatched_sizes=True
+        args.model,
+        id2label=id2label_beaufort,
+        label2id=label2id_beaufort,
+        num_labels=len(id2label_beaufort),
+        ignore_mismatched_sizes=True,
     )
 
     augmentation = None
@@ -116,7 +59,7 @@ def main(args):
         augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
         LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
 
-    map_fn = partial(preprocess_batch, image_processor)
+    map_fn = partial(preprocess_batch_beaufort, image_processor)
 
     if os.path.exists(os.path.join(args.input, "split_sizes.json")):
         with open(os.path.join(args.input, "split_sizes.json"), "r", encoding="utf-8") as f:
@@ -166,6 +109,7 @@ def main(args):
         output_dir=model_dir,
         eval_strategy="epoch",
         save_strategy="epoch",
+        load_best_model_at_end=True,
         save_total_limit=1,
         learning_rate=args.learning_rate,
         lr_scheduler_type="linear",

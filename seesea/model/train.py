@@ -127,6 +127,7 @@ def main(args):
         logging_strategy="steps",
         logging_steps=50,
         max_steps=total_steps,
+        load_best_model_at_end=True,
     )
 
     trainer = Trainer(
