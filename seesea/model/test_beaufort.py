@@ -11,6 +11,9 @@ import torch
 from transformers import AutoImageProcessor, DefaultDataCollator
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+import seaborn as sns
+import matplotlib.pyplot as plt
+
 
 from seesea.model.beaufort import preprocess_batch_beaufort
 
@@ -47,6 +50,7 @@ def main(args):
     test_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
     accuracy = evaluate.load("accuracy")
+    confusion_matrix = evaluate.load("confusion_matrix")
 
     model.eval()
     for batch in tqdm(loader, desc="Testing", disable=LOGGER.level > logging.INFO):
@@ -57,10 +61,37 @@ def main(args):
         logits = outputs.logits
         predictions = torch.argmax(logits, dim=-1)
         accuracy.add_batch(predictions=predictions, references=batch["labels"])
+        confusion_matrix.add_batch(predictions=predictions, references=batch["labels"])
 
     test_end_time = datetime.datetime.now(tz=datetime.timezone.utc)
     LOGGER.info("Test duration: %s", test_end_time - test_start_time)
     LOGGER.info("Accuracy: %s", accuracy.compute())
+
+    # Get confusion matrix
+    cm = confusion_matrix.compute()
+    LOGGER.info("Confusion matrix: %s", cm)
+
+    # Create plot
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(
+        cm["confusion_matrix"],
+        annot=True,  # Show numbers in cells
+        fmt="d",  # Format as integers
+        cmap="Blues",  # Color scheme
+        xticklabels=range(13),  # Assuming Beaufort scale 0-12
+        yticklabels=range(13),
+    )
+
+    plt.title("Confusion Matrix")
+    plt.xlabel("Predicted")
+    plt.ylabel("Actual")
+
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output, exist_ok=True)
+
+    # Save the plot
+    plt.savefig(os.path.join(args.output, "confusion_matrix.png"))
+    plt.close()
 
 
 def get_args_parser():
