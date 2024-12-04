@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 
 from seesea.common import utils
 
-from seesea.model.multihead import MultiHeadModel  # Import the model class
+from seesea.model.multihead.multihead_model import MultiHeadModel  # Import the model class
 
 LOGGER = logging.getLogger(__name__)
 

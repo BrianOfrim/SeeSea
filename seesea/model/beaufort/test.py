@@ -15,7 +15,7 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-from seesea.model.beaufort import preprocess_batch_beaufort
+from seesea.model.beaufort.beaufort_utils import preprocess_batch_beaufort
 
 LOGGER = logging.getLogger(__name__)
 

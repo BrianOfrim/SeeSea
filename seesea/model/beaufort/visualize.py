@@ -11,7 +11,7 @@ import numpy as np
 from datasets import load_dataset
 from transformers import AutoImageProcessor
 
-from seesea.model.beaufort import mps_to_beaufort, BeaufortRanges, id2label_beaufort
+from seesea.model.beaufort.beaufort_utils import mps_to_beaufort, BeaufortRanges, id2label_beaufort
 
 LOGGER = logging.getLogger(__name__)
 

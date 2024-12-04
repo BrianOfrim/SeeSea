@@ -1,4 +1,4 @@
-"""Train a model to classify Beaufort sea states"""
+"Training script for the SeeSea model."
 
 import os
 import logging
@@ -6,8 +6,6 @@ from functools import partial
 import datetime
 from typing import Callable
 import json
-
-import numpy as np
 from torchvision import transforms
 from datasets import load_dataset
 
@@ -18,10 +16,9 @@ from transformers import (
     Trainer,
     DefaultDataCollator,
 )
-
 import evaluate
 import torch
-from seesea.model.beaufort import id2label_beaufort, label2id_beaufort, preprocess_batch_beaufort
+from seesea.model.multihead.multihead_model import MultiHeadModel
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,35 +29,47 @@ def augment_batch(augmentation: Callable, samples):
     return samples
 
 
-def compute_metrics(metric, eval_pred):
-    predictions, labels = eval_pred
-    predictions = np.argmax(predictions, axis=1)
-    return metric.compute(predictions=predictions, references=labels)
+def preprocess_batch(transform: Callable, label_keys: list, samples):
+    """Preprocess a batch of samples"""
+    samples["pixel_values"] = transform(samples["jpg"])["pixel_values"]
+    samples["labels"] = [[obj[key] for key in label_keys] for obj in samples["json"]]
+    return samples
+
+
+def compute_metrics(metric, output_names, eval_pred):
+    """Compute the metrics for the evaluation"""
+    logits, labels = eval_pred
+    predictions = logits
+    results = {}
+    # Individual MAEs for each output
+    for i, name in enumerate(output_names):
+        results[f"mae_{name}"] = metric.compute(predictions=predictions[:, i], references=labels[:, i])["mae"]
+    # Overall MAE across all outputs
+    results["mae"] = metric.compute(predictions=predictions.flatten(), references=labels.flatten())["mae"]
+    return results
 
 
 def main(args):
     """train the model"""
+
+    LOGGER.info("Training the model to classify %s", args.output_names)
 
     if not os.path.exists(args.output):
         os.makedirs(args.output)
 
     image_processor = AutoImageProcessor.from_pretrained(args.model)
 
-    model = AutoModelForImageClassification.from_pretrained(
-        args.model,
-        id2label=id2label_beaufort,
-        label2id=label2id_beaufort,
-        num_labels=len(id2label_beaufort),
-        ignore_mismatched_sizes=True,
-    )
+    base_model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True)
+    model = MultiHeadModel(base_model, len(args.output_names))
 
     augmentation = None
     if args.rotation is not None:
         augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
         LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
 
-    map_fn = partial(preprocess_batch_beaufort, image_processor)
+    map_fn = partial(preprocess_batch, image_processor, args.output_names)
 
+    # load the split sizes
     if os.path.exists(os.path.join(args.input, "split_sizes.json")):
         with open(os.path.join(args.input, "split_sizes.json"), "r", encoding="utf-8") as f:
             split_sizes = json.load(f)
@@ -98,7 +107,7 @@ def main(args):
         total_steps,
     )
 
-    accuracy = evaluate.load("accuracy")
+    mae_metric = evaluate.load("mae")
 
     training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
@@ -109,7 +118,6 @@ def main(args):
         output_dir=model_dir,
         eval_strategy="epoch",
         save_strategy="epoch",
-        load_best_model_at_end=True,
         save_total_limit=1,
         learning_rate=args.learning_rate,
         lr_scheduler_type="linear",
@@ -119,6 +127,7 @@ def main(args):
         logging_strategy="steps",
         logging_steps=50,
         max_steps=total_steps,
+        load_best_model_at_end=True,
     )
 
     trainer = Trainer(
@@ -127,7 +136,7 @@ def main(args):
         data_collator=data_collator,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        compute_metrics=partial(compute_metrics, accuracy),
+        compute_metrics=partial(compute_metrics, mae_metric, args.output_names),
     )
 
     trainer.train()
@@ -146,9 +155,13 @@ def main(args):
     LOGGER.info(f"Saving complete model to {model_ouput_dir}")
     torch.save(model, os.path.join(model_ouput_dir, "model.pt"))
     LOGGER.info("Model saved successfully")
-
     # save the image processor
     image_processor.save_pretrained(model_ouput_dir)
+
+    # save the output name
+    output_names_path = os.path.join(model_ouput_dir, "output_names.txt")
+    with open(output_names_path, "w", encoding="utf-8") as output_names_file:
+        output_names_file.write("\n".join(args.output_names))
 
 
 def get_args_parser():
@@ -163,6 +176,13 @@ def get_args_parser():
     parser.add_argument("--batch-size", type=int, help="The batch size to use for training", default=32)
     parser.add_argument("--learning-rate", type=float, help="The learning rate to use for training", default=0.001)
     parser.add_argument("--model", type=str, help="The model to use for training", default="resnet18")
+    parser.add_argument(
+        "--output-names",
+        type=str,
+        nargs="+",
+        help="The observation variable(s) to train the network to classify",
+        required=True,
+    )
     parser.add_argument(
         "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
     )
