@@ -84,25 +84,26 @@ def main(args):
         image_processor = AutoImageProcessor.from_pretrained(args.model)
         # Save the image processor to the output directory
         image_processor.save_pretrained(output_dir)
+        training_args = TrainingArguments(
+            output_dir=output_dir,
+            eval_strategy="epoch",
+            save_strategy="epoch",
+            load_best_model_at_end=True,
+            save_total_limit=1,
+            learning_rate=args.learning_rate,
+            lr_scheduler_type="linear",
+            warmup_ratio=args.warmup_ratio,
+            per_device_train_batch_size=args.batch_size,
+            per_device_eval_batch_size=args.batch_size,
+            logging_strategy="steps",
+            logging_steps=50,
+            max_steps=total_steps,
+        )
     else:
         image_processor = AutoImageProcessor.from_pretrained(output_dir)
-
-    training_args = TrainingArguments(
-        output_dir=output_dir,
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        load_best_model_at_end=True,
-        save_total_limit=1,
-        learning_rate=args.learning_rate,
-        lr_scheduler_type="linear",
-        warmup_ratio=args.warmup_ratio,
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
-        logging_strategy="steps",
-        logging_steps=50,
-        max_steps=total_steps,
-        ignore_data_skip=True,
-    )
+        training_args = torch.load(os.path.join(args.checkpoint, "training_args.bin"))
+        training_args.ignore_data_skip = True
+        print(training_args)
 
     augmentation = None
     if args.rotation is not None:
