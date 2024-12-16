@@ -33,7 +33,7 @@ def mps_to_beaufort(wind_speed):
     for i, (lower, upper) in enumerate(BeaufortRanges):
         if lower <= wind_speed < upper:
             return i
-    assert False, "Wind speed out of range somehow"
+    assert False, "Wind speed out of range somehow: " + str(wind_speed)
     return len(BeaufortRanges) - 1
 
 

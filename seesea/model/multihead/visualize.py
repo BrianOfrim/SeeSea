@@ -2,6 +2,7 @@
 Visualize the outputs of the multihead model
 """
 
+import argparse
 import os
 import logging
 
@@ -92,7 +93,6 @@ def main(args):
 
 
 def get_args_parser():
-    import argparse
 
     parser = argparse.ArgumentParser(description="Run inference on a trained multihead model.")
     parser.add_argument("--dataset", help="Path to the directory containing the dataset to load")
