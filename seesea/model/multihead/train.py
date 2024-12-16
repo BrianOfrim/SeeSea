@@ -1,4 +1,4 @@
-"Training script for the SeeSea model."
+"Training script for multiheaded regression model"
 
 import os
 import logging
@@ -6,9 +6,10 @@ from functools import partial
 import datetime
 from typing import Callable
 import json
+import argparse
+
 from torchvision import transforms
 from datasets import load_dataset
-
 from transformers import (
     AutoImageProcessor,
     AutoModelForImageClassification,
@@ -18,6 +19,7 @@ from transformers import (
 )
 import evaluate
 import torch
+
 from seesea.model.multihead.multihead_model import MultiHeadModel
 
 LOGGER = logging.getLogger(__name__)
@@ -54,22 +56,19 @@ def main(args):
 
     LOGGER.info("Training the model to classify %s", args.output_names)
 
-    if not os.path.exists(args.output):
-        os.makedirs(args.output)
+    os.makedirs(args.output, exist_ok=True)
 
-    image_processor = AutoImageProcessor.from_pretrained(args.model)
+    training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
-    base_model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True)
-    model = MultiHeadModel(base_model, len(args.output_names))
+    timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
 
-    augmentation = None
-    if args.rotation is not None:
-        augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
-        LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
+    if args.checkpoint:
+        # Get the parent directory of the checkpoint
+        output_dir = os.path.join(args.checkpoint, os.pardir)
 
-    map_fn = partial(preprocess_batch, image_processor, args.output_names)
+    else:
+        output_dir = os.path.join(args.output, timestamp_str)
 
-    # load the split sizes
     if os.path.exists(os.path.join(args.input, "split_sizes.json")):
         with open(os.path.join(args.input, "split_sizes.json"), "r", encoding="utf-8") as f:
             split_sizes = json.load(f)
@@ -82,6 +81,45 @@ def main(args):
     else:
         num_training_samples = 65536
         LOGGER.info("No split sizes found, using %d training samples", num_training_samples)
+
+    steps_per_epoch = num_training_samples // args.batch_size
+    total_steps = steps_per_epoch * args.epochs
+
+    if args.checkpoint is None:
+        image_processor = AutoImageProcessor.from_pretrained(args.model)
+        # Save the image processor to the output directory
+        image_processor.save_pretrained(output_dir)
+
+        base_model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True)
+        model = MultiHeadModel(base_model, len(args.output_names))
+
+        training_args = TrainingArguments(
+            output_dir=output_dir,
+            eval_strategy="epoch",
+            save_strategy="epoch",
+            load_best_model_at_end=True,
+            save_total_limit=1,
+            learning_rate=args.learning_rate,
+            lr_scheduler_type="linear",
+            warmup_ratio=args.warmup_ratio,
+            per_device_train_batch_size=args.batch_size,
+            per_device_eval_batch_size=args.batch_size,
+            logging_strategy="steps",
+            logging_steps=50,
+            max_steps=total_steps,
+        )
+    else:
+        image_processor = AutoImageProcessor.from_pretrained(output_dir)
+        model = torch.load(os.path.join(args.checkpoint))
+        training_args = torch.load(os.path.join(args.checkpoint, "training_args.bin"))
+        training_args.ignore_data_skip = True
+
+    augmentation = None
+    if args.rotation is not None:
+        augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
+        LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
+
+    map_fn = partial(preprocess_batch, image_processor, args.output_names)
 
     full_dataset = load_dataset("webdataset", data_dir=args.input, streaming=True)
 
@@ -96,39 +134,7 @@ def main(args):
 
     data_collator = DefaultDataCollator()
 
-    steps_per_epoch = num_training_samples // args.batch_size
-    total_steps = steps_per_epoch * args.epochs
-
-    LOGGER.debug(
-        "Training for %d epochs with %d steps per epoch. Batch size: %d,  Total steps: %d",
-        args.epochs,
-        steps_per_epoch,
-        args.batch_size,
-        total_steps,
-    )
-
     mae_metric = evaluate.load("mae")
-
-    training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
-
-    timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
-    model_dir = os.path.join(args.output, timestamp_str)
-
-    training_args = TrainingArguments(
-        output_dir=model_dir,
-        eval_strategy="epoch",
-        save_strategy="epoch",
-        save_total_limit=1,
-        learning_rate=args.learning_rate,
-        lr_scheduler_type="linear",
-        warmup_ratio=args.warmup_ratio,
-        per_device_train_batch_size=args.batch_size,
-        per_device_eval_batch_size=args.batch_size,
-        logging_strategy="steps",
-        logging_steps=50,
-        max_steps=total_steps,
-        load_best_model_at_end=True,
-    )
 
     trainer = Trainer(
         model=model,
@@ -139,7 +145,7 @@ def main(args):
         compute_metrics=partial(compute_metrics, mae_metric, args.output_names),
     )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.checkpoint)
 
     # run the test set
     test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
@@ -149,44 +155,52 @@ def main(args):
     LOGGER.info("Test results: %s", test_result)
 
     # save the model
-    model_ouput_dir = os.path.join(model_dir, "model")
-    if not os.path.exists(model_ouput_dir):
-        os.makedirs(model_ouput_dir)
-    LOGGER.info(f"Saving complete model to {model_ouput_dir}")
-    torch.save(model, os.path.join(model_ouput_dir, "model.pt"))
-    LOGGER.info("Model saved successfully")
-    # save the image processor
-    image_processor.save_pretrained(model_ouput_dir)
+
+    torch.save(model, os.path.join(output_dir, "model.pt"))
+    LOGGER.info("Model saved successfully to %s", output_dir)
 
     # save the output name
-    output_names_path = os.path.join(model_ouput_dir, "output_names.txt")
+    output_names_path = os.path.join(output_dir, "output_names.txt")
     with open(output_names_path, "w", encoding="utf-8") as output_names_file:
         output_names_file.write("\n".join(args.output_names))
 
 
 def get_args_parser():
-    import argparse
 
-    parser = argparse.ArgumentParser(description="Train the SeeSea model")
+    parser = argparse.ArgumentParser(description="Train the SeeSea multiheaded regression model")
+
     parser.add_argument("--input", help="The directory containing the training data", default="data")
-    parser.add_argument("--output", help="The directory to write the output files to", default="data/train")
+
+    parser.add_argument(
+        "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
+    )
+
     parser.add_argument("--log", type=str, help="Log level", default="INFO")
     parser.add_argument("--log-file", type=str, help="Log file", default=None)
+
+    group = parser.add_mutually_exclusive_group()
+
+    group.add_argument("--checkpoint", help="Path to a saved model checkpoint to load", default=None)
+
+    group.add_argument("--model", type=str, help="The model to use for training", default="resnet18")
+
+    # The following are only used if no checkpoint path was provided
+    parser.add_argument(
+        "--output",
+        help="The directory to write the output files to.",
+        default="data/train",
+    )
     parser.add_argument("--epochs", type=int, help="The number of epochs to train for", default=30)
     parser.add_argument("--batch-size", type=int, help="The batch size to use for training", default=32)
     parser.add_argument("--learning-rate", type=float, help="The learning rate to use for training", default=0.001)
-    parser.add_argument("--model", type=str, help="The model to use for training", default="resnet18")
+    parser.add_argument("--warmup-ratio", type=float, help="The ratio of steps to use for warmup", default=0.1)
     parser.add_argument(
         "--output-names",
         type=str,
         nargs="+",
         help="The observation variable(s) to train the network to classify",
-        required=True,
     )
-    parser.add_argument(
-        "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
-    )
-    parser.add_argument("--warmup-ratio", type=float, help="The ratio of steps to use for warmup", default=0.1)
+
     return parser
 
 

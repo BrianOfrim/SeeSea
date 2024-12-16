@@ -22,7 +22,11 @@ from transformers import (
 
 import evaluate
 import torch
-from seesea.model.beaufort.beaufort_utils import id2label_beaufort, label2id_beaufort, preprocess_batch_beaufort
+from seesea.model.beaufort.beaufort_utils import (
+    id2label_beaufort,
+    label2id_beaufort,
+    preprocess_batch_beaufort,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -103,7 +107,6 @@ def main(args):
         image_processor = AutoImageProcessor.from_pretrained(output_dir)
         training_args = torch.load(os.path.join(args.checkpoint, "training_args.bin"))
         training_args.ignore_data_skip = True
-        print(training_args)
 
     augmentation = None
     if args.rotation is not None:
@@ -133,7 +136,7 @@ def main(args):
         data_collator=data_collator,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        compute_metrics=accuracy,
+        compute_metrics=partial(compute_metrics, accuracy),
     )
 
     trainer.train(resume_from_checkpoint=args.checkpoint)
@@ -152,7 +155,16 @@ def main(args):
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description="Train the SeeSea model")
+    parser = argparse.ArgumentParser(description="Train the SeeSea beaufort scale model")
+
+    parser.add_argument("--input", help="The directory containing the training data", default="data")
+
+    parser.add_argument(
+        "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
+    )
+    parser.add_argument("--log", type=str, help="Log level", default="INFO")
+    parser.add_argument("--log-file", type=str, help="Log file", default=None)
+
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--checkpoint", help="Path to a saved model checkpoint to load", default=None)
 
@@ -163,22 +175,16 @@ def get_args_parser():
         default="resnet18",
     )
 
-    parser.add_argument("--input", help="The directory containing the training data", default="data")
-    parser.add_argument("--epochs", type=int, help="The number of epochs to train for", default=30)
-    parser.add_argument("--batch-size", type=int, help="The batch size to use for training", default=32)
-    parser.add_argument("--log", type=str, help="Log level", default="INFO")
-    parser.add_argument("--log-file", type=str, help="Log file", default=None)
-    parser.add_argument(
-        "--rotation", type=float, help="The random rotation angle to use for data augmentation", default=None
-    )
-    parser.add_argument("--learning-rate", type=float, help="The learning rate to use for training", default=0.001)
-    parser.add_argument("--warmup-ratio", type=float, help="The ratio of steps to use for warmup", default=0.1)
-
+    # The following are only used if no checkpoint path was provided
     parser.add_argument(
         "--output",
-        help="The directory to write the output files to. (only used if no checkpoint is provided)",
+        help="The directory to write the output files to.",
         default="data/train",
     )
+    parser.add_argument("--epochs", type=int, help="The number of epochs to train for", default=30)
+    parser.add_argument("--batch-size", type=int, help="The batch size to use for training", default=32)
+    parser.add_argument("--learning-rate", type=float, help="The learning rate to use for training", default=0.001)
+    parser.add_argument("--warmup-ratio", type=float, help="The ratio of steps to use for warmup", default=0.1)
 
     return parser
 
