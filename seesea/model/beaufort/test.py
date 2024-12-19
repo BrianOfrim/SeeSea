@@ -65,7 +65,17 @@ def main(args):
 
     test_end_time = datetime.datetime.now(tz=datetime.timezone.utc)
     LOGGER.info("Test duration: %s", test_end_time - test_start_time)
-    LOGGER.info("Accuracy: %s", accuracy.compute())
+
+    accuracy_score = accuracy.compute()
+
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output, exist_ok=True)
+
+    LOGGER.info("Accuracy: %s", accuracy_score["accuracy"])
+
+    # Write the accuracy to a file
+    with open(os.path.join(args.output, "accuracy.txt"), "w", encoding="utf-8") as f:
+        f.write(str(accuracy_score))
 
     # Get confusion matrix
     cm = confusion_matrix.compute()
@@ -85,9 +95,6 @@ def main(args):
     plt.title("Confusion Matrix")
     plt.xlabel("Predicted")
     plt.ylabel("Actual")
-
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output, exist_ok=True)
 
     # Save the plot
     plt.savefig(os.path.join(args.output, "confusion_matrix.png"))
