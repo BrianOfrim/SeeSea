@@ -41,28 +41,28 @@ Current best known hyperperameters:
 - Epochs: 50 (~50000 total training steps)
 - Batch size: 64
 
-## Sample output
+#### Sample regression model output
 
 <table>
 <tr>
-<td><img src="readme_assets/Z10A_2024_10_11_1110_0_vis.png"/></td>
-<td><img src="readme_assets/Z67A_2024_10_06_0110_3_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/Z10A_2024_10_11_1110_0_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/Z67A_2024_10_06_0110_3_vis.png"/></td>
 </tr>
 <tr>
-<td><img src="readme_assets/W11A_2024_10_04_2210_3_vis.png"/></td>
-<td><img src="readme_assets/Z25A_2024_09_26_1810_3_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/W11A_2024_10_04_2210_3_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/Z25A_2024_09_26_1810_3_vis.png"/></td>
 </tr>
 <tr>
-<td><img src="readme_assets/W31A_2024_10_02_0410_5_vis.png"/></td>
-<td><img src="readme_assets/W38A_2024_09_26_1818_1_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/W31A_2024_10_02_0410_5_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/W38A_2024_09_26_1818_1_vis.png"/></td>
 </tr>
 <tr>
-<td><img src="readme_assets/W64A_2024_09_19_1710_0_vis.png"/></td>
-<td><img src="readme_assets/W81A_2024_09_21_1910_3_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/W64A_2024_09_19_1710_0_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/W81A_2024_09_21_1910_3_vis.png"/></td>
 </tr>
 <tr>
-<td><img src="readme_assets/Z27A_2024_09_18_2110_5_vis.png"/></td>
-<td><img src="readme_assets/W92A_2024_10_11_1410_0_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/Z27A_2024_09_18_2110_5_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/W92A_2024_10_11_1410_0_vis.png"/></td>
 </tr>
 </table>
 
@@ -109,8 +109,24 @@ Current best known hyperperameters:
 - Epochs: 30 (~30000 total training steps)
 - Batch size: 64
 
+#### Sample beaufort model output
 
-#### Other potential data sources
+<table>
+<tr>
+<td><img src="readme_assets/beaufort_samples/Z76A_2024_10_10_1510_4.png"/></td>
+<td><img src="readme_assets/beaufort_samples/W63A_2024_09_29_0910_5.png"/></td>
+</tr>
+<tr>
+<td><img src="readme_assets/beaufort_samples/W64A_2024_10_10_1710_1.png"/></td>
+<td><img src="readme_assets/beaufort_samples/Z60A_2024_10_11_1810_0.png"/></td>
+</tr>
+<tr>
+<td><img src="readme_assets/beaufort_samples/Z10A_2024_09_28_1810_0.png"/></td>
+<td><img src="readme_assets/beaufort_samples/W17A_2024_10_11_1810_2.png"/></td>
+</tr>
+</table>
+
+## Other potential data sources
 Great Lakes Environmental Research Labs webcam images: 
 - https://www.glerl.noaa.gov/metdata/
 

@@ -57,13 +57,21 @@ def main(args):
         LOGGER.info("Wind speed: %s, Beaufort: %s, Predicted: %s", wind_speed, beaufort, predicted_beaufort)
 
         plt.imshow(image)
+        # Set the figure name
+        figure_name = f"{image_name}"
+
         plt.title(f"Image: {image_name}")
-        subtitle = (
-            f"Label={id2label_beaufort[beaufort]} mps={wind_speed:.2f}, bf={beaufort}, rng={BeaufortRanges[beaufort]}\n"
+        subtitle = f"Label: beaufort={beaufort}, [{id2label_beaufort[beaufort]}], ({wind_speed:.2f}m/s)\n"
+        subtitle += (
+            f"Predicted: beaufort={predicted_beaufort}, [{id2label_beaufort[predicted_beaufort]}],"
+            f" confidence={confidence:.2f}"
         )
-        subtitle += f"Predicted={id2label_beaufort[predicted_beaufort]} bf={predicted_beaufort}, conf={confidence:.2f}"
         plt.suptitle(subtitle)
         plt.axis("off")
+
+        # Set the window title
+        plt.gcf().canvas.manager.set_window_title(figure_name)
+
         plt.show()
 
 
