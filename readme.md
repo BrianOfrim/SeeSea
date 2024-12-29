@@ -142,3 +142,6 @@ USGS Costal cameras:
 Live surf cameras:
 - https://thesurfersview.com
 - https://www.surfline.com 
+
+Nova Scotia Webcams:
+- https://www.novascotiawebcams.com

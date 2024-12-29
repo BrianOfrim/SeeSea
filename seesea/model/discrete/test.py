@@ -1,4 +1,4 @@
-"""Test the Beaufort model"""
+"""Test the discrete model"""
 
 import os
 from functools import partial
@@ -14,21 +14,20 @@ from tqdm import tqdm
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-
-from seesea.model.beaufort.beaufort_utils import preprocess_batch_beaufort
+from seesea.model.discrete.train import preprocess_batch, NUM_BINS
 
 LOGGER = logging.getLogger(__name__)
 
 
 def main(args):
-    """Run tests on the Beaufort model"""
+    """Run tests on the Discrete model"""
 
     # Load model and processor
     model = torch.load(os.path.join(args.model_dir, "model.pt"))
     image_processor = AutoImageProcessor.from_pretrained(os.path.join(args.model_dir))
 
     # Setup dataset
-    map_fn = partial(preprocess_batch_beaufort, image_processor)
+    map_fn = partial(preprocess_batch, image_processor)
     dataset = load_dataset("webdataset", data_dir=args.dataset, split=args.split, streaming=True)
     dataset = dataset.map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
 
@@ -88,8 +87,8 @@ def main(args):
         annot=True,  # Show numbers in cells
         fmt="d",  # Format as integers
         cmap="Blues",  # Color scheme
-        xticklabels=range(13),  # Assuming Beaufort scale 0-12
-        yticklabels=range(13),
+        xticklabels=range(NUM_BINS),
+        yticklabels=range(NUM_BINS),
     )
 
     plt.title("Confusion Matrix")
@@ -104,7 +103,7 @@ def main(args):
 def get_args_parser():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Test the SeeSea beaufort model")
+    parser = argparse.ArgumentParser(description="Test the SeeSea discrete model")
     parser.add_argument("--model-dir", help="Directory containing the trained model", required=True)
     parser.add_argument("--dataset", help="Directory containing the test dataset", required=True)
     parser.add_argument("--output", help="Directory to save test results", required=True)
