@@ -19,6 +19,10 @@ from tqdm import tqdm
 
 from seesea.model.multihead.multihead_model import MultiHeadModel  # Import the model class
 
+import warnings
+
+warnings.simplefilter(action="ignore", category=FutureWarning)
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -43,6 +47,19 @@ def save_results(labels, predictions, output_dir):
             "mae": np.mean(np.abs(residuals)).item(),
         }
 
+    if "wind_speed_mps" in labels.keys():
+        rounded_predictions = np.round(predictions["wind_speed_mps"])
+        test_results["wind_speed_mps"] |= {
+            "rounded_mse": np.mean(np.square(rounded_predictions - labels["wind_speed_mps"])).item(),
+            "rounded_mae": np.mean(np.abs(rounded_predictions - labels["wind_speed_mps"])).item(),
+        }
+        # Use isclose() instead of direct equality comparison
+        test_results["wind_speed_mps"] |= {
+            "rounded_accuracy": np.mean(
+                np.isclose(rounded_predictions, labels["wind_speed_mps"], rtol=1e-5, atol=1e-8)
+            ).item(),
+        }
+
     # Overall metrics
     all_residuals = np.concatenate([labels[name] - predictions[name] for name in labels.keys()])
     test_results["overall"] = {
@@ -61,14 +78,15 @@ def save_results(labels, predictions, output_dir):
         outputs = predictions[name]
         residuals = inputs - outputs
 
-        # Inputs vs Outputs scatter plot
-        plt.figure()
-        plt.scatter(inputs, outputs, alpha=0.5, s=1)
+        # Inputs vs Outputs density scatter plot
+        plt.figure(figsize=(10, 8))
+        plt.hist2d(inputs, outputs, bins=50, cmap="viridis", norm=plt.cm.colors.LogNorm())
+        plt.colorbar(label="Count")
         plt.plot([np.min(inputs), np.max(inputs)], [np.min(inputs), np.max(inputs)], "r--")
-        plt.title(f"{name}: Inputs vs Outputs")
+        plt.title(f"{name}: Inputs vs Outputs (with density)")
         plt.xlabel("True Values")
         plt.ylabel("Predicted Values")
-        plt.savefig(os.path.join(output_dir, f"{name}_inputs_vs_outputs.png"))
+        plt.savefig(os.path.join(output_dir, f"{name}_inputs_vs_outputs_density.png"))
         plt.close()
 
         # Residuals histogram

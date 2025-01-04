@@ -10,8 +10,17 @@ class MultiHeadModel(nn.Module):
 
         self.base_model = base_model
 
+        # Add global average pooling
+        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+
+        if hasattr(base_model, "config"):
+            # Added this for Swin Transformer
+            hidden_size = base_model.config.hidden_size
+            self.base_model.classifier = nn.Identity()
+            self.pool = None  # Not needed for Swin Transformer
+
         # Handle both ResNet (fc) and other models (classifier)
-        if hasattr(base_model, "fc"):
+        elif hasattr(base_model, "fc"):
             hidden_size = base_model.fc.in_features
             self.base_model.fc = nn.Identity()
         elif hasattr(base_model, "classifier"):
@@ -27,8 +36,6 @@ class MultiHeadModel(nn.Module):
         else:
             raise ValueError("Model must have either 'fc' or 'classifier' as final layer")
 
-        # Add global average pooling
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
         self.heads = nn.ModuleList([nn.Linear(hidden_size, 1) for _ in range(num_outputs)])
 
     def forward(self, pixel_values, labels):
@@ -36,9 +43,19 @@ class MultiHeadModel(nn.Module):
             raise ValueError("labels cannot be None")
 
         features = self.base_model.base_model(pixel_values)[0]  # Shape: [batch_size, channels, height, width]
-        # Apply pooling and reshape
-        features = self.pool(features)  # Shape: [batch_size, channels, 1, 1]
-        features = features.flatten(1)  # Shape: [batch_size, channels]
+
+        if self.pool is not None:
+            # Apply pooling and reshape
+            features = self.pool(features)  # Shape: [batch_size, channels, 1, 1]
+            features = features.flatten(1)  # Shape: [batch_size, channels]
+            logits = torch.cat([head(features) for head in self.heads], dim=1)
+
+        else:
+            # Swin transformer
+            # Feature Shape: [batch_size, num_patches, hidden_size]
+            # Global Average Pooling: [batch_size, hidden_size]
+            features = features.mean(dim=1)
+
         logits = torch.cat([head(features) for head in self.heads], dim=1)
 
         loss_fct = nn.MSELoss()

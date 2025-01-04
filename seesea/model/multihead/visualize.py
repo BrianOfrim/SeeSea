@@ -78,12 +78,20 @@ def main(args):
         plt.axis("off")
 
         # Create subtitle with all predictions
-        # subtitle = f"bright: {brightness:.2f}, sharp: {sharpness:.2f}\n"
         subtitle = ""
         for name, pred, target, error in zip(output_names, outputs, labels, errors):
-            subtitle += f"{name} - target: {target:.3f}, pred: {pred:.3f}, diff: {error:.3f}\n"
+            subtitle += f"{name}: target={target:.3f}, pred={pred:.3f}, diff={error:.3f}\n"
 
         plt.suptitle(subtitle)
+
+        # Set the window title
+        plt.gcf().canvas.manager.set_window_title(image_name)
+
+        # Check if image_name matches a file in readme_assets and save if it does
+        # readme_assets_dir = "readme_assets/regression_samples"
+        # if os.path.exists(os.path.join(readme_assets_dir, image_name + "_vis.png")):
+        #     plt.savefig(os.path.join(readme_assets_dir, image_name + "_vis_new.png"), bbox_inches="tight", dpi=300)
+
         plt.show()
 
         count += 1

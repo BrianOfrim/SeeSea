@@ -19,25 +19,19 @@ Different pretrained image classification models were tested such a various size
 Current best results on the test data split are:  
 
 wind_speed_mps:
-- Mean Squared Error: 1.095
-- Mean Absolute Error: 0.777
+- Mean Absolute Error: 0.657 m/s
 
 wave_height_m:
-- Mean Squared Error: 0.386
-- Mean Absolute Error: 0.439
-
-Overall (All regression heads combined):
-- Mean Squared Error: 0.741
-- Mean Absolute Error: 0.607
+- Mean Absolute Error: 0.375 m
 
 These results were achieved with the following training script input:
 ```
-python -m seesea.model.multihead.train --log DEBUG --input /Volumes/external/NOAA_buoycams --output /Volumes/external/seesea/train --batch-size 64 --model "microsoft/resnet-50" --epochs 50 --learning-rate 0.0005 --output-names wind_speed_mps wave_height_m --rotation 12
+python -m seesea.model.multihead.train --log DEBUG --input /Volumes/external/NOAA_buoycams --output /Volumes/external/seesea/train --batch-size 64 --model "microsoft/swin-tiny-patch4-window7-224" --epochs 50 --learning-rate 0.0001 --output-names wind_speed_mps wave_height_m --rotation 12
 ```
 Current best known hyperperameters:
-- Backbone pretrained image classification model: ResNet-50
+- Backbone pretrained image classification model: swin-tiny-patch4-window7-224
 - Optimizer: AdamW
-- Learning rate: scheduler type: linear, peak=0.0005, warmup ratio:0.1
+- Learning rate: scheduler type: cosine annealing with warmup, peak=0.0001, warmup ratio:0.1
 - Epochs: 50 (~50000 total training steps)
 - Batch size: 64
 
@@ -54,7 +48,7 @@ Current best known hyperperameters:
 </tr>
 <tr>
 <td><img src="readme_assets/regression_samples/W31A_2024_10_02_0410_5_vis.png"/></td>
-<td><img src="readme_assets/regression_samples/W38A_2024_09_26_1818_1_vis.png"/></td>
+<td><img src="readme_assets/regression_samples/W38A_2024_09_26_1810_1_vis.png"/></td>
 </tr>
 <tr>
 <td><img src="readme_assets/regression_samples/W64A_2024_09_19_1710_0_vis.png"/></td>
@@ -90,7 +84,7 @@ Beaufort scale is a scale of wind speed from 0 to 12.
 
 Current best results on the test data split are:  
 
-- Accuracy: 70%
+- Accuracy: ~70%
 
 Confusion matrix:
 
@@ -108,6 +102,8 @@ Current best known hyperperameters:
 - Learning rate: scheduler type: linear, peak=0.001, warmup ratio:0.1
 - Epochs: 30 (~30000 total training steps)
 - Batch size: 64
+
+Note: When the wind speed output of the multihead regression model is binned into the Beaufort scale, the model achieves ~73% accuracy which is better than the beaufort image classification model.
 
 #### Sample beaufort model output
 
