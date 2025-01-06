@@ -95,7 +95,7 @@ def main(args):
             load_best_model_at_end=True,
             save_total_limit=1,
             learning_rate=args.learning_rate,
-            lr_scheduler_type="linear",
+            lr_scheduler_type="cosine",
             warmup_ratio=args.warmup_ratio,
             per_device_train_batch_size=args.batch_size,
             per_device_eval_batch_size=args.batch_size,
