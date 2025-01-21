@@ -26,25 +26,25 @@ if __name__ == "__main__":
     else:
         device = torch.device("cpu")
 
-    model_name = "nvidia/segformer-b1-finetuned-ade-512-512"
+    model_name = "nvidia/segformer-b0-finetuned-ade-512-512"
 
-    water_body_labels = ["sea", "water", "river", "lake"]
+    # water_body_labels = ["sea", "water", "river", "lake"]
 
     config = AutoConfig.from_pretrained(model_name)
 
     # Print the labels
-    # if hasattr(config, "id2label"):
-    #     labels = config.id2label
-    #     print("Model Labels:")
-    #     for label_id, label_name in labels.items():
-    #         print(f"{label_id}: {label_name}")
-    # else:
-    #     print("The model configuration does not contain label information.")
+    if hasattr(config, "id2label"):
+        labels = config.id2label
+        print("Model Labels:")
+        for label_id, label_name in labels.items():
+            print(f"{label_id}: {label_name}")
+    else:
+        print("The model configuration does not contain label information.")
 
-    water_body_ids = [config.label2id[label] for label in water_body_labels]
+    # water_body_ids = [config.label2id[label] for label in water_body_labels]
 
     pipe = pipeline("image-segmentation", model=model_name, device=device)
-    dataset = load_dataset("webdataset", data_dir=args.dataset, split=args.split, streaming=True)
+    dataset = load_dataset("webdataset", data_dir=args.dataset, split=args.split, streaming=True).shuffle(seed=42)
 
     for sample in dataset:
         image = sample["jpg"]
@@ -62,28 +62,28 @@ if __name__ == "__main__":
         # if len(water_outputs) < 2:
         #     continue
 
-        binary_mask = np.zeros(np.array(outputs[0]["mask"]).shape)
-        for output in outputs:
-            if output["label"] in water_body_labels:
-                # Convert PIL Image mask to numpy array before comparison
-                mask_array = np.array(output["mask"])
-                binary_mask[mask_array != 0] = 1
+        # binary_mask = np.zeros(np.array(outputs[0]["mask"]).shape)
+        # for output in outputs:
+        #     if output["label"] in water_body_labels:
+        #         # Convert PIL Image mask to numpy array before comparison
+        #         mask_array = np.array(output["mask"])
+        #         binary_mask[mask_array != 0] = 1
 
-        percent_water = np.sum(binary_mask) / (binary_mask.shape[0] * binary_mask.shape[1])
+        # percent_water = np.sum(binary_mask) / (binary_mask.shape[0] * binary_mask.shape[1])
 
-        if percent_water > 0.1:
-            print(f"Water body detected with {percent_water:.2f} coverage")
-            continue
+        # # if percent_water > 0.1:
+        # #     print(f"Water body detected with {percent_water:.2f} coverage")
+        # #     continue
 
-        # Display the image and the binary mask side by side
-        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
-        axs[0].imshow(image)
-        axs[0].set_title("Original")
-        axs[0].axis("off")
-        axs[1].imshow(binary_mask)
-        axs[1].set_title(f"Water Body Mask, {percent_water:.2f}")
-        axs[1].axis("off")
-        plt.show()
+        # # Display the image and the binary mask side by side
+        # fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+        # axs[0].imshow(image)
+        # axs[0].set_title("Original")
+        # axs[0].axis("off")
+        # axs[1].imshow(binary_mask)
+        # axs[1].set_title(f"Water Body Mask, {percent_water:.2f}")
+        # axs[1].axis("off")
+        # plt.show()
 
         # Display all image alongside all the masks if there are more than one, label the masks with the class name
         if len(outputs) > 1:
