@@ -1,0 +1,20 @@
+# Core dependencies
+numpy
+torch
+pillow
+requests
+matplotlib
+seaborn
+
+# Dataset and model dependencies
+webdataset
+transformers
+datasets
+evaluate
+tensorboard
+
+# Image processing
+easyocr
+
+# Testing
+pytest
