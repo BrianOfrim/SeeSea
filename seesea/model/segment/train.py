@@ -2,6 +2,8 @@
 Fine-tuning a segmentation model for the Seesea dataset
 """
 
+import os
+import json
 import logging
 from transformers import (
     SegformerForSemanticSegmentation,
@@ -13,8 +15,18 @@ from transformers import (
 import torch
 import numpy as np
 from datasets import load_dataset
+from torch.utils.data import DataLoader
+from transformers import TrainingArguments, Trainer
+import datetime
 
 LOGGER = logging.getLogger(__name__)
+
+
+# def collate_fn(samples):
+#     """Collate the samples into a batch"""
+#     images = [s["pixel_values"] for s in samples]
+#     labels = [s["masks"] for s in samples]
+#     return torch.stack(images), torch.tensor(labels)
 
 
 def main(args):
@@ -27,6 +39,51 @@ def main(args):
     # Load a teacher and student model, we will use the teacher to generate labels for the student
     # We will add the teacher's mountain and sand masks to the water mask
 
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    training_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
+
+    timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
+
+    output_dir = os.path.join(args.output_dir, timestamp_str)
+
+    num_training_samples = None
+    num_validation_samples = None
+    num_test_samples = None
+
+    if args.num_training_samples is not None:
+        num_training_samples = args.num_training_samples
+
+    elif os.path.exists(os.path.join(args.dataset, "split_sizes.json")):
+        with open(os.path.join(args.dataset, "split_sizes.json"), "r", encoding="utf-8") as f:
+            split_sizes = json.load(f)
+        num_training_samples = split_sizes["training"]
+        num_validation_samples = split_sizes["validation"]
+        num_test_samples = split_sizes["test"]
+        LOGGER.info(
+            "Loaded split sizes from %s. Using %d training samples, %d validation samples, %d test samples",
+            os.path.join(args.dataset, "split_sizes.json"),
+            num_training_samples,
+            num_validation_samples,
+            num_test_samples,
+        )
+
+    if num_training_samples is None:
+        num_training_samples = 65536
+
+    if num_validation_samples is None:
+        num_validation_samples = num_training_samples // 10
+
+    if num_test_samples is None:
+        num_test_samples = num_training_samples // 10
+
+    LOGGER.info(
+        "Using %d training samples, %d validation samples, %d test samples",
+        num_training_samples,
+        num_validation_samples,
+        num_test_samples,
+    )
+
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available():
@@ -35,7 +92,8 @@ def main(args):
         device = torch.device("cpu")
 
     teacher_pipe = pipeline("image-segmentation", model=args.model_name, device=device)
-    student_model = SegformerForSemanticSegmentation.from_pretrained(args.model_name)
+    model = SegformerForSemanticSegmentation.from_pretrained(args.model_name)
+    model = model.to(device)
 
     image_processor = SegformerImageProcessor.from_pretrained(args.model_name)
 
@@ -48,35 +106,94 @@ def main(args):
     full_dataset = load_dataset("webdataset", data_dir=args.dataset, streaming=True)
 
     def map_fn(samples):
-        samples["pixel_values"] = image_processor(samples["jpg"])["pixel_values"]
+        # Process images with the image processor and convert to tensor
+        pixel_values = image_processor(samples["jpg"], return_tensors="pt")["pixel_values"]
         teacher_outputs = teacher_pipe(samples["jpg"])
-        samples["masks"] = []
+        # Ensure pixel_values has shape (batch_size, channels, height, width)
+        if len(pixel_values.shape) == 3:
+            pixel_values = pixel_values.unsqueeze(0)
+        samples["pixel_values"] = pixel_values
+        samples["labels"] = []
+
         for teacher_output in teacher_outputs:
-            # for each sample merge all masks into a single maske where the pixel values are the label ids
+            # for each sample merge all masks into a single mask where the pixel values are the label ids
             first_output = teacher_output[0]
             first_mask = first_output["mask"]
             label_mask = torch.zeros_like(torch.tensor(np.array(first_mask)))
             for output in teacher_output:
                 id = label2id[output["label"]]
-                mask_array = torch.tensor(np.array(output["mask"]))
+                mask_array = torch.tensor(np.array(output["mask"]), dtype=torch.long)
                 label_mask[mask_array != 0] = id
-            samples["masks"].append(label_mask)
+            samples["labels"].append(label_mask)
 
         return samples
 
-    # train the
-    train_ds = full_dataset["train"].take(8).shuffle().map(map_fn, batched=True)
+    # Save the image processor to the output directory
+    image_processor.save_pretrained(output_dir)
 
-    for sample in train_ds:
-        print(sample)
-        break
+    # train the model
+    train_ds = (
+        full_dataset["train"]
+        .take(num_training_samples)
+        .shuffle()
+        .map(map_fn, batched=True)
+        .select_columns(["pixel_values", "labels"])
+    )
 
-    # user the teacher to generate labels
-    # val_ds = full_dataset["validation"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+    val_ds = (
+        full_dataset["validation"]
+        .take(num_validation_samples)
+        .shuffle()
+        .map(map_fn, batched=True)
+        .select_columns(["labels", "pixel_values"])
+    )
 
-    # data_collator = DefaultDataCollator()
+    steps_per_epoch = num_training_samples // args.batch_size
+    total_steps = steps_per_epoch * args.epochs
 
-    # accuracy = evaluate.load("accuracy")
+    training_args = TrainingArguments(
+        output_dir=args.output_dir,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        load_best_model_at_end=True,
+        save_total_limit=1,
+        learning_rate=args.learning_rate,
+        lr_scheduler_type="linear",
+        warmup_ratio=args.warmup_ratio,
+        per_device_train_batch_size=args.batch_size,
+        per_device_eval_batch_size=args.batch_size,
+        logging_strategy="steps",
+        logging_steps=50,
+        max_steps=total_steps,
+    )
+
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_ds,
+        eval_dataset=val_ds,
+        data_collator=DefaultDataCollator(),
+    )
+
+    trainer.train()
+
+    # run the test set
+    test_ds = (
+        full_dataset["test"]
+        .take(num_test_samples)
+        .shuffle()
+        .map(map_fn, batched=True)
+        .select_columns(["labels", "pixel_values"])
+    )
+
+    test_result = trainer.predict(test_ds)
+
+    LOGGER.info("Test results: %s", test_result)
+
+    # save the model
+
+    torch.save(model, os.path.join(output_dir, "model.pt"))
+    LOGGER.info("Model saved successfully to %s", output_dir)
 
 
 def get_args_parser():
@@ -87,6 +204,10 @@ def get_args_parser():
     parser.add_argument("--model-name", type=str, help="Name of the pretrained model", required=True)
     parser.add_argument("--dataset", type=str, help="Path to the dataset", required=True)
     parser.add_argument("--output-dir", type=str, help="Path to the output directory", required=True)
+    parser.add_argument("--epochs", type=int, help="Number of epochs", default=10)
+    parser.add_argument("--learning-rate", type=float, help="Learning rate", default=1e-4)
+    parser.add_argument("--warmup-ratio", type=float, help="Warmup ratio", default=0.1)
+    parser.add_argument("--num-training-samples", type=int, help="Number of training samples", default=None)
     return parser
 
 
