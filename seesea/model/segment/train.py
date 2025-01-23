@@ -22,13 +22,6 @@ import datetime
 LOGGER = logging.getLogger(__name__)
 
 
-# def collate_fn(samples):
-#     """Collate the samples into a batch"""
-#     images = [s["pixel_values"] for s in samples]
-#     labels = [s["masks"] for s in samples]
-#     return torch.stack(images), torch.tensor(labels)
-
-
 def main(args):
     """
     Fine-tune a segmentation model for the Seesea dataset
@@ -45,7 +38,7 @@ def main(args):
 
     timestamp_str = training_start_time.strftime("%Y_%m_%d_%H%M")
 
-    output_dir = os.path.join(args.output_dir, timestamp_str)
+    run_output_dir = os.path.join(args.output_dir, timestamp_str)
 
     num_training_samples = None
     num_validation_samples = None
@@ -129,7 +122,7 @@ def main(args):
         return samples
 
     # Save the image processor to the output directory
-    image_processor.save_pretrained(output_dir)
+    image_processor.save_pretrained(run_output_dir)
 
     # train the model
     train_ds = (
@@ -152,13 +145,13 @@ def main(args):
     total_steps = steps_per_epoch * args.epochs
 
     training_args = TrainingArguments(
-        output_dir=args.output_dir,
+        output_dir=run_output_dir,
         eval_strategy="epoch",
         save_strategy="epoch",
         load_best_model_at_end=True,
         save_total_limit=1,
         learning_rate=args.learning_rate,
-        lr_scheduler_type="linear",
+        lr_scheduler_type="cosine",
         warmup_ratio=args.warmup_ratio,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
@@ -192,8 +185,8 @@ def main(args):
 
     # save the model
 
-    torch.save(model, os.path.join(output_dir, "model.pt"))
-    LOGGER.info("Model saved successfully to %s", output_dir)
+    torch.save(model, os.path.join(run_output_dir, "model.pt"))
+    LOGGER.info("Model saved successfully to %s", run_output_dir)
 
 
 def get_args_parser():
