@@ -128,7 +128,7 @@ def main(args):
     train_ds = (
         full_dataset["train"]
         .take(num_training_samples)
-        .shuffle()
+        .shuffle(buffer_size=512)
         .map(map_fn, batched=True)
         .select_columns(["pixel_values", "labels"])
     )
@@ -136,7 +136,6 @@ def main(args):
     val_ds = (
         full_dataset["validation"]
         .take(num_validation_samples)
-        .shuffle()
         .map(map_fn, batched=True)
         .select_columns(["labels", "pixel_values"])
     )
@@ -172,11 +171,7 @@ def main(args):
 
     # run the test set
     test_ds = (
-        full_dataset["test"]
-        .take(num_test_samples)
-        .shuffle()
-        .map(map_fn, batched=True)
-        .select_columns(["labels", "pixel_values"])
+        full_dataset["test"].take(num_test_samples).map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
     )
 
     test_result = trainer.predict(test_ds)
