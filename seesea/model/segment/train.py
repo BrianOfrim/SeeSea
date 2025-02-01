@@ -84,7 +84,6 @@ def main(args):
     else:
         device = torch.device("cpu")
 
-    teacher_pipe = pipeline("image-segmentation", model=args.model_name, device=device)
     model = SegformerForSemanticSegmentation.from_pretrained(args.model_name)
     model = model.to(device)
 
@@ -100,26 +99,12 @@ def main(args):
 
     def map_fn(samples):
         # Process images with the image processor and convert to tensor
-        pixel_values = image_processor(samples["jpg"], return_tensors="pt")["pixel_values"]
-        teacher_outputs = teacher_pipe(samples["jpg"])
-        # Ensure pixel_values has shape (batch_size, channels, height, width)
-        if len(pixel_values.shape) == 3:
-            pixel_values = pixel_values.unsqueeze(0)
-        samples["pixel_values"] = pixel_values
-        samples["labels"] = []
+        pixel_values = image_processor(samples["image.jpg"], return_tensors="pt")["pixel_values"]
 
-        for teacher_output in teacher_outputs:
-            # for each sample merge all masks into a single mask where the pixel values are the label ids
-            first_output = teacher_output[0]
-            first_mask = first_output["mask"]
-            label_mask = torch.zeros_like(torch.tensor(np.array(first_mask)))
-            for output in teacher_output:
-                id = label2id[output["label"]]
-                mask_array = torch.tensor(np.array(output["mask"]), dtype=torch.long)
-                label_mask[mask_array != 0] = id
-            samples["labels"].append(label_mask)
+        # Convert PNG mask to numpy array first, then to tensor
+        labels = torch.tensor(np.array(samples["mask.png"]), dtype=torch.long)
 
-        return samples
+        return {"pixel_values": pixel_values, "labels": labels}
 
     # Save the image processor to the output directory
     image_processor.save_pretrained(run_output_dir)
@@ -137,7 +122,7 @@ def main(args):
         full_dataset["validation"]
         .take(num_validation_samples)
         .map(map_fn, batched=True)
-        .select_columns(["labels", "pixel_values"])
+        .select_columns(["pixel_values", "labels"])
     )
 
     steps_per_epoch = num_training_samples // args.batch_size
@@ -171,7 +156,7 @@ def main(args):
 
     # run the test set
     test_ds = (
-        full_dataset["test"].take(num_test_samples).map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+        full_dataset["test"].take(num_test_samples).map(map_fn, batched=True).select_columns(["pixel_values", "labels"])
     )
 
     test_result = trainer.predict(test_ds)

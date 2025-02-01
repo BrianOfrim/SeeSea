@@ -9,7 +9,7 @@ import json
 import matplotlib.pyplot as plt
 import numpy as np
 
-from seesea.common.observation import Observation, get_all_image_observations
+from seesea.common.observation import Observation, get_all_image_observations, ObservationStatistics
 
 LOGGER = logging.getLogger(__name__)
 
@@ -77,7 +77,7 @@ if __name__ == "__main__":
 
         values.sort()
 
-        stats = Statistic(
+        stats = ObservationStatistics(
             key=key,
             min=np.min(values),
             max=np.max(values),
