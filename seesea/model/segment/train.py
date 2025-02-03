@@ -106,8 +106,13 @@ def main(args):
 
         return {"pixel_values": pixel_values, "labels": labels}
 
-    # Save the image processor to the output directory
+    # Save the model configuration and image processor
+    model.config.save_pretrained(run_output_dir)
     image_processor.save_pretrained(run_output_dir)
+
+    # Save the model state
+    model.save_pretrained(run_output_dir)
+    LOGGER.info("Model saved successfully to %s", run_output_dir)
 
     # train the model
     train_ds = (
@@ -162,11 +167,6 @@ def main(args):
     test_result = trainer.predict(test_ds)
 
     LOGGER.info("Test results: %s", test_result)
-
-    # save the model
-
-    torch.save(model, os.path.join(run_output_dir, "model.pt"))
-    LOGGER.info("Model saved successfully to %s", run_output_dir)
 
 
 def get_args_parser():
