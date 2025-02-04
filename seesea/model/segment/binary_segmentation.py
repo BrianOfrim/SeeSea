@@ -10,9 +10,9 @@ from transformers import AutoImageProcessor, AutoConfig, AutoModelForSemanticSeg
 from datasets import load_dataset
 import matplotlib.pyplot as plt
 
-could_be_sea = ["earth", "mountain", "sand", "water"]
-
 consider_as_sea = ["sea", "water", "river", "lake"]
+prevent_relabel_if_top = ["sky"]  # Categories that prevent relabeling if they're the top prediction
+MIN_SEA_PERCENTAGE = 0.10  # 10% minimum sea requirement
 
 
 def main(args):
@@ -67,22 +67,42 @@ def main(args):
         # Compute top n predictions for each pixel. Shape: (n_top, height, width)
         top_preds = upsampled_logits.topk(n_top, dim=1)[1][0]
 
+        # Apply softmax to logits to get probabilities
+        probabilities = torch.nn.functional.softmax(upsampled_logits[0], dim=0)
+
         # Create an updated segmentation from the top n predictions
         pred_seg = original_pred_seg.clone()
 
-        # Create a boolean mask for pixels with a label in 'label_as_sea'
-        mask_from_labels = torch.zeros_like(pred_seg, dtype=torch.bool)
-        for label in could_be_sea:
-            mask_from_labels |= pred_seg == label2id[label]
+        # --- Updated logic with confidence sum threshold ---
+        CONFIDENCE_THRESHOLD = 0.001  # 0.1% threshold
 
-        # Check if 'sea' is among the top n predictions
-        sea_in_top_n = (top_preds == label2id["sea"]).any(dim=0)
+        # Get top n probabilities and their indices
+        top_probs, top_indices = probabilities.topk(n_top, dim=0)
 
-        print(f"Number of pixels that will be relabeled: {mask_from_labels.sum()}")
+        # Create mask for pixels where top prediction is in prevent_relabel_if_top list
+        prevent_mask = torch.zeros_like(pred_seg, dtype=torch.bool)
+        for label in prevent_relabel_if_top:
+            if label in label2id:
+                prevent_mask |= original_pred_seg == label2id[label]
 
-        # Relabel: where label belongs to label_as_sea and has 'sea' in its top n predictions.
-        mask = mask_from_labels & sea_in_top_n
+        # Calculate sum of probabilities for sea-related classes within top n
+        sea_confidence_sum = torch.zeros_like(pred_seg, dtype=torch.float)
+        for label in consider_as_sea:
+            if label in label2id:
+                label_id = label2id[label]
+                # Create a mask for where this label appears in top n
+                label_in_top_n = top_indices == label_id
+                # Add the corresponding probabilities where the label appears
+                sea_confidence_sum += (top_probs * label_in_top_n).sum(dim=0)
+
+        # Create mask where sum of sea-related confidences exceeds threshold
+        # AND the pixel is not in prevent_relabel_if_top categories
+        mask = (sea_confidence_sum > CONFIDENCE_THRESHOLD) & ~prevent_mask
+
+        # Relabel any pixel where the criteria are met
         pred_seg[mask] = label2id["sea"]
+
+        print(f"Number of pixels that will be relabeled: {mask.sum()}")
 
         # Determine image shape
         height, width = original_pred_seg.shape
@@ -107,8 +127,8 @@ def main(args):
         masked_image_original = (image_np * 0.5 + color_seg_original * 0.5).astype(np.uint8)
         masked_image_updated = (image_np * 0.5 + color_seg_updated * 0.5).astype(np.uint8)
 
-        # Plot the two overlays side-by-side
-        fig, axes = plt.subplots(1, 2, figsize=(30, 15))
+        # Plot the overlays side-by-side
+        fig, axes = plt.subplots(1, 2, figsize=(30, 15))  # Changed to 2 subplots
         axes[0].imshow(masked_image_original)
         axes[0].set_title("Original Argmax Segmentation Overlay")
         axes[0].axis("off")
@@ -119,53 +139,67 @@ def main(args):
             ncol=len(legend_elements_original),
         )
 
-        axes[1].imshow(masked_image_updated)
-        axes[1].set_title("Top n-Relabeled Segmentation Overlay")
+        # Create binary mask
+        binary_mask = torch.zeros_like(pred_seg, dtype=torch.bool)
+
+        # Add areas that were originally sea-related
+        for label in consider_as_sea:
+            if label in label2id:
+                binary_mask |= original_pred_seg == label2id[label]
+
+        # Add areas that were relabeled to sea
+        binary_mask |= mask  # mask from earlier contains the relabeled pixels
+
+        # Create binary overlay
+        color_seg_binary = np.zeros((height, width, 3), dtype=np.uint8)
+        # Sea areas in blue
+        color_seg_binary[binary_mask] = [0, 0, 255]  # Blue for sea
+        # Non-sea areas in green
+        color_seg_binary[~binary_mask] = [0, 255, 0]  # Green for non-sea
+
+        # Create the binary overlay image
+        masked_image_binary = (image_np * 0.7 + color_seg_binary * 0.3).astype(np.uint8)
+
+        # Calculate sea percentage
+        total_pixels = binary_mask.numel()
+        sea_pixels = binary_mask.sum().item()
+        sea_percentage = sea_pixels / total_pixels
+
+        # Plot binary overlay with border based on sea percentage
+        axes[1].imshow(masked_image_binary)
+        axes[1].set_title(f"Binary Sea/Non-Sea Overlay\n{sea_percentage:.1%} sea")
         axes[1].axis("off")
+
+        # Add border based on sea percentage threshold
+        if sea_percentage >= MIN_SEA_PERCENTAGE:
+            # Green rectangle for valid images
+            rect = plt.Rectangle(
+                (-20, -20), width + 40, height + 40, fill=False, color="green", linewidth=5, transform=axes[1].transData
+            )
+            axes[1].add_patch(rect)
+        else:
+            # Red circle for invalid images
+            circle = plt.Circle(
+                (width / 2, height / 2),
+                radius=min(width, height) / 1.8,
+                fill=False,
+                color="red",
+                linewidth=5,
+                transform=axes[1].transData,
+            )
+            axes[1].add_patch(circle)
+
+        # Add legend for binary mask
+        legend_elements_binary = [
+            plt.Rectangle((0, 0), 1, 1, fc=(0, 0, 1), label="Sea"),
+            plt.Rectangle((0, 0), 1, 1, fc=(0, 1, 0), label="Non-Sea"),
+        ]
         axes[1].legend(
-            handles=legend_elements_updated,
+            handles=legend_elements_binary,
             bbox_to_anchor=(0.5, -0.1),
             loc="upper center",
-            ncol=len(legend_elements_updated),
+            ncol=len(legend_elements_binary),
         )
-
-        # ----- Begin interactive hover tooltip below ----- #
-        # Create an annotation object that will serve as the tooltip.
-        annotation = axes[0].annotate(
-            "",
-            xy=(0, 0),
-            xytext=(20, 20),
-            textcoords="offset points",
-            bbox=dict(boxstyle="round", fc="w"),
-            arrowprops=dict(arrowstyle="->"),
-        )
-        annotation.set_visible(False)
-
-        # This callback updates the annotation with the top n labels at the cursor location.
-        def hover(event):
-            # Ensure the event is within the axes for the original overlay.
-            if event.inaxes == axes[0] and event.xdata is not None and event.ydata is not None:
-                x, y = int(event.xdata), int(event.ydata)
-                # Verify that the (x, y) coordinates fall inside the image bounds.
-                if 0 <= x < width and 0 <= y < height:
-                    # Access the top n predictions for the pixel (note indexing: [n_top, row, col]).
-                    top_ids = top_preds[:, y, x].tolist()
-                    # Convert prediction IDs to labels using integer keys.
-                    top_labels = [id2label.get(t, "Unknown") for t in top_ids]
-                    annotation_text = f"Top {n_top} Predictions:\n" + "\n".join(top_labels)
-                    annotation.set_text(annotation_text)
-                    annotation.xy = (x, y)
-                    annotation.set_visible(True)
-                    fig.canvas.draw_idle()
-            else:
-                # Hide the annotation if the cursor is not in the relevant axes.
-                if annotation.get_visible():
-                    annotation.set_visible(False)
-                    fig.canvas.draw_idle()
-
-        # Connect the hover callback to the figure.
-        fig.canvas.mpl_connect("motion_notify_event", hover)
-        # ----- End interactive hover tooltip ----- #
 
         plt.show()
 
