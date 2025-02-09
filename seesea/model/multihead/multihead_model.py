@@ -1,12 +1,80 @@
 import torch
 from torch import nn
+from torch.nn import functional as F
+
+from enum import Enum, auto
+from dataclasses import dataclass
+from typing import List
+
+SIN_INDEX = 0
+COS_INDEX = 1
+
+
+class OutputType(Enum):
+    """Types of outputs supported by the model"""
+
+    LINEAR = auto()  # Standard linear regression output
+    ANGLE = auto()  # Angular output (e.g. for heading prediction)
+
+
+def get_head_type(name: str) -> OutputType:
+    # if the name ends with "_deg" then it's an angle head
+    if name.endswith("_deg"):
+        return OutputType.ANGLE
+    else:
+        return OutputType.LINEAR
+
+
+def get_output_size(type: OutputType):
+    if type == OutputType.LINEAR:
+        return 1
+    elif type == OutputType.ANGLE:
+        return 2
+    else:
+        raise ValueError(f"Unsupported output type: {type}")
+
+
+class OutputHead(nn.Module):
+    def __init__(self, name: str, input_size: int):
+        super().__init__()
+        self.name = name
+        self.type = get_head_type(name)
+        self.output_layer = nn.Linear(input_size, get_output_size(self.type))
+
+    def get_output_size(self):
+        if self.type == OutputType.LINEAR:
+            return 1
+        elif self.type == OutputType.ANGLE:
+            return 2
+        else:
+            raise ValueError(f"Unsupported output type: {self.type}")
+
+    def forward(self, x):
+        return self.output_layer(x)
+
+    def loss_fn(self, logits, labels):
+        if self.type == OutputType.LINEAR:
+            return F.mse_loss(logits.squeeze(-1), labels)
+        elif self.type == OutputType.ANGLE:
+            # For angle outputs, logits has shape [batch_size, 2] (sin and cos components)
+            # labels has shape [batch_size]
+            # Need to convert labels to sin/cos components
+            angle_rad = torch.deg2rad(labels)
+            target_sin = torch.sin(angle_rad)
+            target_cos = torch.cos(angle_rad)
+
+            sin_loss = F.mse_loss(logits[:, SIN_INDEX], target_sin)
+            cos_loss = F.mse_loss(logits[:, COS_INDEX], target_cos)
+            return sin_loss + cos_loss
+        else:
+            raise ValueError(f"Unsupported output type: {self.type}")
 
 
 class MultiHeadModel(nn.Module):
-    def __init__(self, base_model, num_outputs):
+    def __init__(self, base_model, output_head_names: List[str]):
         super().__init__()
-        if num_outputs < 1:
-            raise ValueError("num_outputs must be at least 1")
+        if len(output_head_names) < 1:
+            raise ValueError("output_head_names must be at least 1")
 
         self.base_model = base_model
 
@@ -36,29 +104,60 @@ class MultiHeadModel(nn.Module):
         else:
             raise ValueError("Model must have either 'fc' or 'classifier' as final layer")
 
-        self.heads = nn.ModuleList([nn.Linear(hidden_size, 1) for _ in range(num_outputs)])
+        self.output_heads = [OutputHead(name=name, input_size=hidden_size) for name in output_head_names]
+        self.heads = nn.ModuleList([head for head in self.output_heads])
 
     def forward(self, pixel_values, labels):
         if labels is None:
             raise ValueError("labels cannot be None")
 
-        features = self.base_model.base_model(pixel_values)[0]  # Shape: [batch_size, channels, height, width]
+        # Assume labels shape [batch_size, len(self.heads) + 1]
+        # Columns 0 to len(self.heads)-1 hold the absolute labels for each head,
+        # and the last column (labels[:, -1]) holds the absolute image direction.
+        full_label_mask = ~torch.isnan(labels)
+        # Exclude the image_direction_deg (last column) from the loss computation mask:
+        head_label_mask = full_label_mask[:, : len(self.heads)]
 
+        # Extract base image direction from the last column.
+        base_direction = labels[:, -1]
+
+        # Extract features from the base model.
+        features = self.base_model.base_model(pixel_values)[0]  # Shape: [batch_size, channels, height, width]
         if self.pool is not None:
-            # Apply pooling and reshape
             features = self.pool(features)  # Shape: [batch_size, channels, 1, 1]
             features = features.flatten(1)  # Shape: [batch_size, channels]
-            logits = torch.cat([head(features) for head in self.heads], dim=1)
-
         else:
-            # Swin transformer
-            # Feature Shape: [batch_size, num_patches, hidden_size]
-            # Global Average Pooling: [batch_size, hidden_size]
             features = features.mean(dim=1)
 
-        logits = torch.cat([head(features) for head in self.heads], dim=1)
+        all_outputs = []
+        total_loss = 0.0
+        valid_labels = 0  # Count number of heads with valid labels
 
-        loss_fct = nn.MSELoss()
-        loss = loss_fct(logits, labels.float())
+        # Iterate over heads. Their corresponding absolute labels for the i-th head are in columns 0 to len(self.heads)-1.
+        for i, head in enumerate(self.heads):
+            head_output = head(features)
+            all_outputs.append(head_output)
 
-        return loss, logits
+            # Get the absolute label for this head.
+            head_labels = labels[:, i]
+            head_mask = head_label_mask[:, i]
+
+            if head.type == OutputType.ANGLE:
+                # Subtract base direction and normalize to [0, 360)
+                effective_labels = (head_labels - base_direction) % 360
+            else:
+                effective_labels = head_labels
+
+            if head_mask.any():
+                head_loss = head.loss_fn(head_output[head_mask], effective_labels[head_mask])
+                total_loss += head_loss
+                valid_labels += head_mask.sum()
+
+        # Concatenate the outputs from all heads.
+        logits = torch.cat(all_outputs, dim=1)
+
+        if valid_labels > 0:
+            # average the loss based on how many outputs contributed to it
+            total_loss = total_loss / valid_labels
+
+        return total_loss, logits

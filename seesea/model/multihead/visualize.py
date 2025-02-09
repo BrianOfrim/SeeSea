@@ -45,31 +45,35 @@ def main(args):
 
     for sample in dataset:
         image = sample["jpg"]
-        labels = [sample["json"][name] for name in output_names]
+        labels = [sample["json"].get(name) for name in output_names]
         image_name = sample["__key__"]
 
         transformed_image = image_processor(image, return_tensors="pt")
         transformed_image = transformed_image["pixel_values"]
         transformed_image = transformed_image.to(device)
 
+        # Create labels tensor with NaN for missing values
+        label_tensor = torch.tensor([[float(l) if l is not None else float("nan") for l in labels]]).to(device)
+
         with torch.no_grad():
-            _, outputs = model(transformed_image, torch.tensor([labels]).to(device))
+            _, outputs, label_mask = model(transformed_image, label_tensor)
 
         outputs = outputs.squeeze().cpu().numpy()
-        errors = outputs - labels
+        labels = label_tensor.squeeze().cpu().numpy()
+        label_mask = label_mask.squeeze().cpu().numpy()
 
-        # Skip if all errors are below min_error threshold
-        if args.min_error is not None and all(abs(e) < args.min_error for e in errors):
-            continue
+        LOGGER.info("%s:", image_name)
+        for name, pred, target, is_valid in zip(output_names, outputs, labels, label_mask):
+            if is_valid:
+                error = pred - target
+                LOGGER.info("  %s: Predicted: %f, Expected: %f, Diff: %f", name, pred, target, error)
+            else:
+                LOGGER.info("  %s: Predicted: %f, No valid label", name, pred)
 
         # Get image quality metrics
         brightness = utils.get_brightness(image)
         sharpness = utils.get_sharpness(image)
         droplets = utils.detect_water_droplets(image)
-
-        LOGGER.info("%s:", image_name)
-        for name, pred, target, error in zip(output_names, outputs, labels, errors):
-            LOGGER.info("  %s: Predicted: %f, Expected: %f, Diff: %f", name, pred, target, error)
 
         LOGGER.debug("Brightness: %f, Sharpness: %f, Droplets: %s", brightness, sharpness, droplets)
 
@@ -79,8 +83,11 @@ def main(args):
 
         # Create subtitle with all predictions
         subtitle = ""
-        for name, pred, target, error in zip(output_names, outputs, labels, errors):
-            subtitle += f"{name}: target={target:.3f}, pred={pred:.3f}, diff={error:.3f}\n"
+        for name, pred, target, is_valid in zip(output_names, outputs, labels, label_mask):
+            if is_valid:
+                subtitle += f"{name}: target={target:.3f}, pred={pred:.3f}, diff={pred - target:.3f}\n"
+            else:
+                subtitle += f"{name}: No valid label\n"
 
         plt.suptitle(subtitle)
 

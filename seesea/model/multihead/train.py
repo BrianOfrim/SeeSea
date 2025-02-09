@@ -7,6 +7,7 @@ import datetime
 from typing import Callable
 import json
 import argparse
+import numpy as np
 
 from torchvision import transforms
 from datasets import load_dataset
@@ -34,20 +35,118 @@ def augment_batch(augmentation: Callable, samples):
 def preprocess_batch(transform: Callable, label_keys: list, samples):
     """Preprocess a batch of samples"""
     samples["pixel_values"] = transform(samples["jpg"])["pixel_values"]
-    samples["labels"] = [[obj[key] for key in label_keys] for obj in samples["json"]]
+
+    # Create labels array with NaN for missing values
+    labels = []
+    for obj in samples["json"]:
+        sample_labels = []
+        # Add main labels
+        for key in label_keys:
+            value = obj.get(key)
+            sample_labels.append(float(value) if value is not None else float("nan"))
+
+        # Add image direction as the last column for each sample
+        image_direction = obj.get("image_direction_deg")
+        sample_labels.append(float(image_direction) if image_direction is not None else float("nan"))
+
+        labels.append(sample_labels)
+
+    samples["labels"] = labels
     return samples
 
 
-def compute_metrics(metric, output_names, eval_pred):
+def compute_angle_from_sincos(predictions_slice):
+    # Convert numpy array to tensor if needed
+    if isinstance(predictions_slice, np.ndarray):
+        predictions_slice = torch.from_numpy(predictions_slice)
+
+    # predictions_slice has shape [batch_size, 2], where:
+    # predictions_slice[:, 0] is the sin component and predictions_slice[:, 1] is the cos component.
+    predicted_radians = torch.atan2(predictions_slice[:, 0], predictions_slice[:, 1])
+    # Convert to degrees
+    predicted_degrees = torch.rad2deg(predicted_radians)
+    return predicted_degrees
+
+
+def circular_error(predictions, targets):
+    # Convert numpy arrays to tensors if needed
+    if isinstance(predictions, np.ndarray):
+        predictions = torch.from_numpy(predictions)
+    if isinstance(targets, np.ndarray):
+        targets = torch.from_numpy(targets)
+
+    # Compute the absolute difference and then take the circular minimum
+    diff = torch.abs(predictions - targets) % 360.0
+    return torch.minimum(diff, 360.0 - diff)
+
+
+def compute_metrics(metric, output_names, metric_stats, eval_pred):
     """Compute the metrics for the evaluation"""
     logits, labels = eval_pred
-    predictions = logits
     results = {}
-    # Individual MAEs for each output
-    for i, name in enumerate(output_names):
-        results[f"mae_{name}"] = metric.compute(predictions=predictions[:, i], references=labels[:, i])["mae"]
-    # Overall MAE across all outputs
-    results["mae"] = metric.compute(predictions=predictions.flatten(), references=labels.flatten())["mae"]
+    col = 0
+
+    # Collect all predictions and references
+    all_predictions = []
+    all_references = []
+
+    for name in output_names:
+        # Get the range for this parameter from metric_stats
+        # Find the stat entry for this name
+        stat_entry = next((stat for stat in metric_stats if stat.get("name") == name), {})
+        param_range = stat_entry.get("max", 1.0) - stat_entry.get("min", 0.0)
+
+        # Avoid division by zero
+        param_range = max(param_range, 1.0)
+
+        if name.endswith("_deg"):  # Angle head
+            predictions_slice = logits[:, col : col + 2]
+            predictions_angles = compute_angle_from_sincos(predictions_slice)
+
+            valid_mask = ~np.isnan(labels[:, col]) & ~np.isnan(labels[:, -1])
+
+            if valid_mask.any():
+                predictions = predictions_angles[valid_mask] + torch.from_numpy(labels[valid_mask, -1])
+                predictions = predictions % 360.0
+                errors = circular_error(predictions, labels[valid_mask, col])
+                # Store unnormalized MAE for individual metric
+                mae_circular = errors.mean().item()
+                results[f"mae_{name}"] = mae_circular
+
+                # Add normalized values to overall metrics (normalize by 180 for circular metrics)
+                all_predictions.append(errors.cpu().numpy() / 180.0)
+                all_references.append(torch.zeros_like(errors).cpu().numpy() / 180.0)
+            else:
+                results[f"mae_{name}"] = float("nan")
+
+            col += 2
+        else:
+            predictions = logits[:, col]
+            valid_mask = ~np.isnan(labels[:, col])
+
+            if valid_mask.any():
+                # Store unnormalized MAE for individual metric
+                mae = metric.compute(predictions=predictions[valid_mask], references=labels[valid_mask, col])["mae"]
+                results[f"mae_{name}"] = mae
+
+                # Add normalized values to overall metrics
+                norm_pred = predictions[valid_mask] / param_range
+                norm_ref = labels[valid_mask, col] / param_range
+                all_predictions.append(norm_pred)
+                all_references.append(norm_ref)
+            else:
+                results[f"mae_{name}"] = float("nan")
+
+            col += 1
+
+    # Compute overall normalized MAE
+    if all_predictions and all_references:
+        all_predictions = np.concatenate([p.flatten() for p in all_predictions])
+        all_references = np.concatenate([r.flatten() for r in all_references])
+        results["mae"] = metric.compute(predictions=all_predictions, references=all_references)["mae"]
+    else:
+        results["mae"] = float("nan")
+
     return results
 
 
@@ -65,22 +164,37 @@ def main(args):
     if args.checkpoint:
         # Get the parent directory of the checkpoint
         output_dir = os.path.join(args.checkpoint, os.pardir)
-
     else:
         output_dir = os.path.join(args.output, timestamp_str)
 
+    split_sizes = None
     if os.path.exists(os.path.join(args.input, "split_sizes.json")):
         with open(os.path.join(args.input, "split_sizes.json"), "r", encoding="utf-8") as f:
             split_sizes = json.load(f)
-        num_training_samples = split_sizes["training"]
+
+    if args.num_training_samples is not None:
+        num_training_samples = args.num_training_samples
         LOGGER.info(
-            "Loaded split sizes from %s. Using %d training samples",
-            os.path.join(args.input, "split_sizes.json"),
-            num_training_samples,
+            "Using %d training samples, from command line argument --num-training-samples", num_training_samples
         )
+    elif split_sizes is not None:
+        num_training_samples = split_sizes["training"]
+        LOGGER.info("Loaded split sizes from split_sizes.json. Using %d training samples", num_training_samples)
     else:
         num_training_samples = 65536
         LOGGER.info("No split sizes found, using %d training samples", num_training_samples)
+
+    if args.num_validation_samples is not None:
+        num_validation_samples = args.num_validation_samples
+        LOGGER.info(
+            "Using %d validation samples, from command line argument --num-validation-samples", num_validation_samples
+        )
+    elif split_sizes is not None:
+        num_validation_samples = split_sizes["validation"]
+        LOGGER.info("Loaded split sizes from split_sizes.json. Using %d validation samples", num_validation_samples)
+    else:
+        num_validation_samples = 4096
+        LOGGER.info("No split sizes found, using %d validation samples", num_validation_samples)
 
     steps_per_epoch = num_training_samples // args.batch_size
     total_steps = steps_per_epoch * args.epochs
@@ -91,12 +205,14 @@ def main(args):
         image_processor.save_pretrained(output_dir)
 
         base_model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True)
-        model = MultiHeadModel(base_model, len(args.output_names))
+        model = MultiHeadModel(base_model, args.output_names)
 
         training_args = TrainingArguments(
             output_dir=output_dir,
-            eval_strategy="epoch",
-            save_strategy="epoch",
+            eval_strategy="steps",
+            eval_steps=steps_per_epoch,
+            save_strategy="steps",
+            save_steps=steps_per_epoch,
             load_best_model_at_end=True,
             save_total_limit=1,
             learning_rate=args.learning_rate,
@@ -130,9 +246,19 @@ def main(args):
 
     train_ds = train_ds.map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
 
-    val_ds = full_dataset["validation"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+    val_ds = (
+        full_dataset["validation"]
+        .take(num_validation_samples)
+        .map(map_fn, batched=True)
+        .select_columns(["labels", "pixel_values"])
+    )
 
     data_collator = DefaultDataCollator()
+
+    metric_stats = {}
+    if os.path.exists(os.path.join(args.input, "statistics.json")):
+        with open(os.path.join(args.input, "statistics.json"), "r", encoding="utf-8") as f:
+            metric_stats = json.load(f)
 
     mae_metric = evaluate.load("mae")
 
@@ -142,20 +268,12 @@ def main(args):
         data_collator=data_collator,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        compute_metrics=partial(compute_metrics, mae_metric, args.output_names),
+        compute_metrics=partial(compute_metrics, mae_metric, args.output_names, metric_stats),
     )
 
     trainer.train(resume_from_checkpoint=args.checkpoint)
 
-    # run the test set
-    test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
-
-    test_result = trainer.predict(test_ds)
-
-    LOGGER.info("Test results: %s", test_result)
-
     # save the model
-
     torch.save(model, os.path.join(output_dir, "model.pt"))
     LOGGER.info("Model saved successfully to %s", output_dir)
 
@@ -163,6 +281,13 @@ def main(args):
     output_names_path = os.path.join(output_dir, "output_names.txt")
     with open(output_names_path, "w", encoding="utf-8") as output_names_file:
         output_names_file.write("\n".join(args.output_names))
+
+    # run the test set
+    test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
+
+    test_result = trainer.predict(test_ds)
+
+    LOGGER.info("Test results: %s", test_result)
 
 
 def get_args_parser():
@@ -200,7 +325,10 @@ def get_args_parser():
         nargs="+",
         help="The observation variable(s) to train the network to classify",
     )
-
+    parser.add_argument("--num-training-samples", type=int, help="The number of training samples to use", default=None)
+    parser.add_argument(
+        "--num-validation-samples", type=int, help="The number of validation samples to use", default=None
+    )
     return parser
 
 
