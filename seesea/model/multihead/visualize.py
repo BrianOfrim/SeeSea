@@ -56,19 +56,14 @@ def main(args):
         label_tensor = torch.tensor([[float(l) if l is not None else float("nan") for l in labels]]).to(device)
 
         with torch.no_grad():
-            _, outputs, label_mask = model(transformed_image, label_tensor)
+            _, outputs = model(transformed_image, label_tensor)
 
         outputs = outputs.squeeze().cpu().numpy()
         labels = label_tensor.squeeze().cpu().numpy()
-        label_mask = label_mask.squeeze().cpu().numpy()
 
         LOGGER.info("%s:", image_name)
-        for name, pred, target, is_valid in zip(output_names, outputs, labels, label_mask):
-            if is_valid:
-                error = pred - target
-                LOGGER.info("  %s: Predicted: %f, Expected: %f, Diff: %f", name, pred, target, error)
-            else:
-                LOGGER.info("  %s: Predicted: %f, No valid label", name, pred)
+        for name, pred, target in zip(output_names, outputs, labels):
+            LOGGER.info("  %s: Predicted: %f, Expected: %f, Diff: %f", name, pred, target, pred - target)
 
         # Get image quality metrics
         brightness = utils.get_brightness(image)
@@ -83,11 +78,8 @@ def main(args):
 
         # Create subtitle with all predictions
         subtitle = ""
-        for name, pred, target, is_valid in zip(output_names, outputs, labels, label_mask):
-            if is_valid:
-                subtitle += f"{name}: target={target:.3f}, pred={pred:.3f}, diff={pred - target:.3f}\n"
-            else:
-                subtitle += f"{name}: No valid label\n"
+        for name, pred, target in zip(output_names, outputs, labels):
+            subtitle += f"{name}: target={target:.3f}, pred={pred:.3f}, diff={pred - target:.3f}\n"
 
         plt.suptitle(subtitle)
 
