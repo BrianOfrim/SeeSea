@@ -108,20 +108,7 @@ class MultiHeadModel(nn.Module):
         self.heads = nn.ModuleList([head for head in self.output_heads])
 
     def forward(self, pixel_values, labels):
-        if labels is None:
-            raise ValueError("labels cannot be None")
-
-        # Assume labels shape [batch_size, len(self.heads) + 1]
-        # Columns 0 to len(self.heads)-1 hold the absolute labels for each head,
-        # and the last column (labels[:, -1]) holds the absolute image direction.
-        full_label_mask = ~torch.isnan(labels)
-        # Exclude the image_direction_deg (last column) from the loss computation mask:
-        head_label_mask = full_label_mask[:, : len(self.heads)]
-
-        # Extract base image direction from the last column.
-        base_direction = labels[:, -1]
-
-        # Extract features from the base model.
+        # Extract features from the base model
         features = self.base_model.base_model(pixel_values)[0]  # Shape: [batch_size, channels, height, width]
         if self.pool is not None:
             features = self.pool(features)  # Shape: [batch_size, channels, 1, 1]
@@ -130,34 +117,41 @@ class MultiHeadModel(nn.Module):
             features = features.mean(dim=1)
 
         all_outputs = []
-        total_loss = 0.0
-        valid_labels = 0  # Count number of heads with valid labels
-
-        # Iterate over heads. Their corresponding absolute labels for the i-th head are in columns 0 to len(self.heads)-1.
-        for i, head in enumerate(self.heads):
+        for head in self.heads:
             head_output = head(features)
             all_outputs.append(head_output)
 
-            # Get the absolute label for this head.
-            head_labels = labels[:, i]
-            head_mask = head_label_mask[:, i]
-
-            if head.type == OutputType.ANGLE:
-                # Subtract base direction and normalize to [0, 360)
-                effective_labels = (head_labels - base_direction) % 360
-            else:
-                effective_labels = head_labels
-
-            if head_mask.any():
-                head_loss = head.loss_fn(head_output[head_mask], effective_labels[head_mask])
-                total_loss += head_loss
-                valid_labels += head_mask.sum()
-
-        # Concatenate the outputs from all heads.
+        # Concatenate the outputs from all heads
         logits = torch.cat(all_outputs, dim=1)
 
-        if valid_labels > 0:
-            # average the loss based on how many outputs contributed to it
-            total_loss = total_loss / valid_labels
+        # Skip loss calculation if in eval mode or if labels are None
+        if self.training and labels is not None:
+            # Assume labels shape [batch_size, len(self.heads) + 1]
+            full_label_mask = ~torch.isnan(labels)
+            head_label_mask = full_label_mask[:, : len(self.heads)]
+            base_direction = labels[:, -1]
+
+            total_loss = 0.0
+            valid_labels = 0
+
+            for i, head in enumerate(self.heads):
+                head_labels = labels[:, i]
+                head_mask = head_label_mask[:, i]
+
+                if head.type == OutputType.ANGLE:
+                    effective_labels = (head_labels - base_direction) % 360
+                else:
+                    effective_labels = head_labels
+
+                if head_mask.any():
+                    head_output = all_outputs[i]
+                    head_loss = head.loss_fn(head_output[head_mask], effective_labels[head_mask])
+                    total_loss += head_loss
+                    valid_labels += head_mask.sum()
+
+            if valid_labels > 0:
+                total_loss = total_loss / valid_labels
+        else:
+            total_loss = None
 
         return total_loss, logits
