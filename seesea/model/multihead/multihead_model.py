@@ -78,43 +78,20 @@ class MultiHeadModel(nn.Module):
 
         self.base_model = base_model
 
-        # Add global average pooling
-        self.pool = nn.AdaptiveAvgPool2d((1, 1))
+        # Get hidden size from Swin Transformer config
+        hidden_size = base_model.config.hidden_size
 
-        if hasattr(base_model, "config"):
-            # Added this for Swin Transformer
-            hidden_size = base_model.config.hidden_size
-            self.base_model.classifier = nn.Identity()
-            self.pool = None  # Not needed for Swin Transformer
+        # Replace classifier with Identity
+        self.base_model.classifier = nn.Identity()
 
-        # Handle both ResNet (fc) and other models (classifier)
-        elif hasattr(base_model, "fc"):
-            hidden_size = base_model.fc.in_features
-            self.base_model.fc = nn.Identity()
-        elif hasattr(base_model, "classifier"):
-            if hasattr(base_model.classifier, "in_features"):
-                hidden_size = base_model.classifier.in_features
-            else:
-                # For sequential classifiers, get the input features of the last linear layer
-                for layer in reversed(base_model.classifier):
-                    if isinstance(layer, nn.Linear):
-                        hidden_size = layer.in_features
-                        break
-            self.base_model.classifier = nn.Identity()
-        else:
-            raise ValueError("Model must have either 'fc' or 'classifier' as final layer")
-
+        # Create output heads
         self.output_heads = [OutputHead(name=name, input_size=hidden_size) for name in output_head_names]
         self.heads = nn.ModuleList([head for head in self.output_heads])
 
     def forward(self, pixel_values, labels):
         # Extract features from the base model
         features = self.base_model.base_model(pixel_values)[0]  # Shape: [batch_size, channels, height, width]
-        if self.pool is not None:
-            features = self.pool(features)  # Shape: [batch_size, channels, 1, 1]
-            features = features.flatten(1)  # Shape: [batch_size, channels]
-        else:
-            features = features.mean(dim=1)
+        features = features.mean(dim=1)  # Global average pooling
 
         all_outputs = []
         for head in self.heads:
