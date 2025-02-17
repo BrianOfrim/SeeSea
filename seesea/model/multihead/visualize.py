@@ -8,24 +8,28 @@ import logging
 
 from datasets import load_dataset
 import torch
-from transformers import AutoImageProcessor
 import matplotlib.pyplot as plt
+from transformers import AutoImageProcessor
 
 from seesea.common import utils
-
-from seesea.model.multihead.multihead_model import MultiHeadModel  # Import the model class
+from seesea.model.multihead.multihead_model import MultiHeadModel, MultiHeadConfig  # Import config class
 
 LOGGER = logging.getLogger(__name__)
 
 
 def main(args):
-    # Load model and processor
-    model = torch.load(os.path.join(args.model_dir, "model.pt"))
-    image_processor = AutoImageProcessor.from_pretrained(os.path.join(args.model_dir))
+    # Load the config first
+    config = MultiHeadConfig.from_pretrained(args.model_dir)
 
-    # Get output names
-    with open(os.path.join(args.model_dir, "output_names.txt"), "r", encoding="utf-8") as f:
-        output_names = f.read().strip().split("\n")
+    # Load base model and processor
+    base_model = torch.load(os.path.join(args.model_dir, "model.pt"))
+    image_processor = AutoImageProcessor.from_pretrained(args.model_dir)
+
+    # Load the model with config and base model
+    model = MultiHeadModel.from_pretrained(args.model_dir, config=config, base_model=base_model)
+
+    # Get output names from model
+    output_names = model.get_output_head_names()
 
     dataset = load_dataset("webdataset", data_dir=args.dataset, split=args.split, streaming=True).shuffle()
 
@@ -56,7 +60,8 @@ def main(args):
         label_tensor = torch.tensor([[float(l) if l is not None else float("nan") for l in labels]]).to(device)
 
         with torch.no_grad():
-            _, outputs = model(transformed_image, label_tensor)
+            outputs = model(transformed_image, label_tensor)
+            outputs = outputs["logits"]  # Get logits from output dict
 
         outputs = outputs.squeeze().cpu().numpy()
         labels = label_tensor.squeeze().cpu().numpy()
@@ -85,11 +90,6 @@ def main(args):
 
         # Set the window title
         plt.gcf().canvas.manager.set_window_title(image_name)
-
-        # Check if image_name matches a file in readme_assets and save if it does
-        # readme_assets_dir = "readme_assets/regression_samples"
-        # if os.path.exists(os.path.join(readme_assets_dir, image_name + "_vis.png")):
-        #     plt.savefig(os.path.join(readme_assets_dir, image_name + "_vis_new.png"), bbox_inches="tight", dpi=300)
 
         plt.show()
 

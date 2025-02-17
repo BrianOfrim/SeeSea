@@ -1,6 +1,8 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+from transformers import PreTrainedModel, PretrainedConfig, AutoModelForImageClassification, AutoModel
+import os
 
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -70,27 +72,36 @@ class OutputHead(nn.Module):
             raise ValueError(f"Unsupported output type: {self.type}")
 
 
-class MultiHeadModel(nn.Module):
-    def __init__(self, base_model, output_head_names: List[str]):
-        super().__init__()
-        if len(output_head_names) < 1:
+class MultiHeadConfig(PretrainedConfig):
+    model_type = "multihead_regression"
+
+    def __init__(self, base_model_name="microsoft/swin-tiny-patch4-window7-224", output_head_names=None, **kwargs):
+        super().__init__(**kwargs)
+        self.base_model_name = base_model_name
+        self.output_head_names = output_head_names if output_head_names is not None else []
+
+
+class MultiHeadModel(PreTrainedModel):
+    def __init__(self, config):
+        super().__init__(config)
+
+        # Store config
+        self.config = config
+
+        if len(self.config.output_head_names) < 1:
             raise ValueError("output_head_names must be at least 1")
 
-        self.base_model = base_model
-
-        # Get hidden size from Swin Transformer config
-        hidden_size = base_model.config.hidden_size
-
-        # Replace classifier with Identity
-        self.base_model.classifier = nn.Identity()
+        # Initialize base model
+        self.backbone = AutoModel.from_pretrained(config.base_model_name)
+        hidden_size = self.backbone.num_features  # Swin models use num_features instead of in_features
 
         # Create output heads
-        self.output_heads = [OutputHead(name=name, input_size=hidden_size) for name in output_head_names]
+        self.output_heads = [OutputHead(name=name, input_size=hidden_size) for name in self.config.output_head_names]
         self.heads = nn.ModuleList([head for head in self.output_heads])
 
-    def forward(self, pixel_values, labels):
+    def forward(self, pixel_values, labels=None):
         # Extract features from the base model
-        features = self.base_model.base_model(pixel_values)[0]  # Shape: [batch_size, channels, height, width]
+        features = self.backbone(pixel_values)[0]
         features = features.mean(dim=1)  # Global average pooling
 
         all_outputs = []
@@ -101,7 +112,7 @@ class MultiHeadModel(nn.Module):
         # Concatenate the outputs from all heads
         logits = torch.cat(all_outputs, dim=1)
 
-        # Skip loss calculation if in eval mode or if labels are None
+        loss = None
         if self.training and labels is not None:
             # Assume labels shape [batch_size, len(self.heads) + 1]
             full_label_mask = ~torch.isnan(labels)
@@ -127,8 +138,46 @@ class MultiHeadModel(nn.Module):
                     valid_labels += head_mask.sum()
 
             if valid_labels > 0:
-                total_loss = total_loss / valid_labels
-        else:
-            total_loss = None
+                loss = total_loss / valid_labels
 
-        return total_loss, logits
+        # Return in HuggingFace format
+        return {"loss": loss, "logits": logits} if loss is not None else {"logits": logits}
+
+    def get_output_head_names(self):
+        """Returns list of output head names"""
+        return self.config.output_head_names
+
+    @classmethod
+    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
+        """Load from pretrained"""
+        config = kwargs.pop("config", None)
+
+        if config is None:
+            raise ValueError("config must be provided")
+
+        model = cls(config)
+
+        # Load the model state dict
+        model_path = os.path.join(pretrained_model_name_or_path, "model.pt")
+        loaded_model = torch.load(model_path, weights_only=True)
+
+        # If we loaded a full model, get its state dict
+        if isinstance(loaded_model, MultiHeadModel):
+            state_dict = loaded_model.state_dict()
+        else:
+            state_dict = loaded_model
+
+        model.load_state_dict(state_dict)
+
+        return model
+
+    def save_pretrained(self, save_directory):
+        """Save the model to a directory"""
+        if not os.path.exists(save_directory):
+            os.makedirs(save_directory)
+
+        # Save the model state dict
+        model_path = os.path.join(save_directory, "pytorch_model.bin")
+        torch.save(self.state_dict(), model_path)
+        # Save the config
+        self.config.save_pretrained(save_directory)
