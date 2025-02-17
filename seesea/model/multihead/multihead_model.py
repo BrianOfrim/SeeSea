@@ -158,16 +158,27 @@ class MultiHeadModel(PreTrainedModel):
         model = cls(config)
 
         # Load the model state dict
-        model_path = os.path.join(pretrained_model_name_or_path, "model.pt")
-        loaded_model = torch.load(model_path, weights_only=True)
+        model_path = os.path.join(pretrained_model_name_or_path, "pytorch_model.bin")
+        state_dict = torch.load(model_path, weights_only=True)
 
-        # If we loaded a full model, get its state dict
-        if isinstance(loaded_model, MultiHeadModel):
-            state_dict = loaded_model.state_dict()
-        else:
-            state_dict = loaded_model
+        # Remove the "base_model.swin." prefix from keys and fix head names
+        # This is just a hack to bridge the gap between the old model format and the new one
+        cleaned_state_dict = {}
+        for key, value in state_dict.items():
+            if key.startswith("base_model.swin."):
+                new_key = key.replace("base_model.swin.", "backbone.")
+                cleaned_state_dict[new_key] = value
+            elif key.startswith("heads."):
+                # Convert "heads.0.weight" to "heads.0.output_layer.weight"
+                parts = key.split(".")
+                if len(parts) == 3:  # matches pattern "heads.{num}.{weight/bias}"
+                    new_key = f"{parts[0]}.{parts[1]}.output_layer.{parts[2]}"
+                    cleaned_state_dict[new_key] = value
+            else:
+                cleaned_state_dict[key] = value
 
-        model.load_state_dict(state_dict)
+        # Load the state dict
+        model.load_state_dict(cleaned_state_dict)
 
         return model
 

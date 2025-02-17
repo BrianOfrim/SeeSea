@@ -5,22 +5,15 @@ import torch
 from datasets import load_dataset
 from transformers import AutoImageProcessor, AutoModelForImageClassification
 from seesea.model.multihead.multihead_model import MultiHeadModel, MultiHeadConfig
+import matplotlib.pyplot as plt
 
 
 def main(args):
     """Main function for the inference script"""
-    base_model_name = "microsoft/swin-tiny-patch4-window7-224"
 
-    config = MultiHeadConfig(base_model_name=base_model_name, output_head_names=args.output_head_names)
-
-    image_processor = AutoImageProcessor.from_pretrained(base_model_name)
-
-    # Load model
-    # model = MultiHeadModel(config)
-
-    model = MultiHeadModel.from_pretrained(args.save_dir, config=config)
-
-    # model.save_pretrained(args.save_dir)
+    config = MultiHeadConfig.from_pretrained(args.model_dir)
+    image_processor = AutoImageProcessor.from_pretrained(args.model_dir)
+    model = MultiHeadModel.from_pretrained(args.model_dir, config=config)
 
     if torch.cuda.is_available():
         device = torch.device("cuda")
@@ -37,7 +30,7 @@ def main(args):
 
     for sample in dataset:
         image = sample["jpg"]
-        labels = [sample["json"].get(name) for name in args.output_head_names]
+        labels = [sample["json"].get(name) for name in config.output_head_names]
         image_name = sample["__key__"]
 
         transformed_image = image_processor(image, return_tensors="pt")
@@ -55,8 +48,26 @@ def main(args):
         labels = label_tensor.squeeze().cpu().numpy()
 
         print(f"Image: {image_name}")
-        for name, pred, target in zip(args.output_head_names, outputs, labels):
+        for name, pred, target in zip(config.output_head_names, outputs, labels):
             print(f"  {name}: Predicted: {pred}, Expected: {target}, Diff: {pred - target}")
+
+        if args.show_images:
+            # show the image with the predicted and expected values
+            plt.imshow(image)
+            plt.title(f"Image: {image_name}")
+            plt.axis("off")
+
+            # Create subtitle with all predictions
+            subtitle = ""
+            for name, pred, target in zip(config.output_head_names, outputs, labels):
+                subtitle += f"{name}: target={target:.3f}, pred={pred:.3f}, diff={pred - target:.3f}\n"
+
+            plt.suptitle(subtitle)
+
+            # Set the window title
+            plt.gcf().canvas.manager.set_window_title(image_name)
+
+            plt.show()
 
 
 def get_args_parser():
@@ -64,8 +75,9 @@ def get_args_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset", type=str, required=True)
     parser.add_argument("--split", type=str, default="train")
-    parser.add_argument("--output-head-names", type=str, nargs="+", required=True)
-    parser.add_argument("--save-dir", type=str, required=True)
+
+    parser.add_argument("--model-dir", type=str, required=True)
+    parser.add_argument("--show-images", action="store_true")
 
     return parser
 
