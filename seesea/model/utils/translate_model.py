@@ -1,32 +1,30 @@
-"""Convert a model from safetensors format to pytorch format"""
+"""Load the model and save it again"""
 
-import os
 import logging
-import torch
-from transformers import AutoModelForImageClassification
+
+from seesea.model.multihead.modeling_multihead import MultiHeadModel, MultiHeadConfig
 
 LOGGER = logging.getLogger(__name__)
 
 
 def main(args):
-    """Load safetensors model and save as pytorch"""
+    """
+    Load the model and save it again.
+    There is some logig in the loader that will translate the state dict to the new format
+    """
 
-    # Load the model from safetensors format
-    model = AutoModelForImageClassification.from_pretrained(args.input)
+    config = MultiHeadConfig.from_pretrained(args.input)
 
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output, exist_ok=True)
+    model = MultiHeadModel.from_pretrained(args.input, config=config)
+    model.save_pretrained(args.output)
 
-    # Save model in pytorch format
-    output_path = os.path.join(args.output, "model.pt")
-    torch.save(model, output_path)
-    LOGGER.info("Model saved to %s", output_path)
+    print(f"Model saved to {args.output}")
 
 
 def get_args_parser():
     import argparse
 
-    parser = argparse.ArgumentParser(description="Convert model from safetensors to pytorch format")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--input", help="Directory containing the safetensors model", required=True)
     parser.add_argument("--output", help="Directory to save the pytorch model", required=True)
     return parser

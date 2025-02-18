@@ -17,8 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from seesea.model.multihead.multihead_model import MultiHeadModel, MultiHeadConfig  # Import the model class
-
+from seesea.model.multihead.modeling_multihead import MultiHeadModel, MultiHeadConfig
 import warnings
 
 warnings.simplefilter(action="ignore", category=FutureWarning)

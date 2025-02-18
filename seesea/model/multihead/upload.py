@@ -1,37 +1,40 @@
-"""A script to upload a trained model to the Hugging Face Hub."""
+"""Load a model from a directory and upload it to the Hugging Face Hub"""
 
 import argparse
 import os
 import torch
-from huggingface_hub import HfApi
-from transformers import AutoImageProcessor, AutoConfig
+from seesea.model.multihead.modeling_multihead import MultiHeadModel, MultiHeadConfig
+from transformers import AutoImageProcessor, AutoConfig, AutoModel
 
 
 def main(args):
-    # The model directory should now contain:
-    # - config.json
-    # - pytorch_model.bin
-    # - preprocessor_config.json
-    
-    api = HfApi()
-    api.upload_folder(
-        folder_path=args.model_dir,
-        repo_id=repo_id,
-        repo_type="model"
-    )
+    """Upload a model to the Hugging Face Hub"""
 
-    # Upload the image processor
-    image_processor = AutoImageProcessor.from_pretrained(args.model_dir)
-    api.upload_file(file_path=image_processor, repo_id=repo_id, repo_type="model")
+    # Register the model and config
+
+    AutoConfig.register("multihead_regression", MultiHeadConfig)
+    AutoModel.register(MultiHeadConfig, MultiHeadModel)
+
+    MultiHeadConfig.register_for_auto_class()
+    MultiHeadModel.register_for_auto_class("AutoModel")
+
+    config = MultiHeadConfig.from_pretrained(args.model_dir)
+    model = MultiHeadModel.from_pretrained(args.model_dir, config=config)
+
+    model.push_to_hub(args.repo_id, use_temp_dir=True)
 
 
 def get_args_parser():
-    parser = argparse.ArgumentParser(description="Upload a trained model to the Hugging Face Hub")
+    """Get the arguments for the script"""
+
+    parser = argparse.ArgumentParser()
     parser.add_argument("--model-dir", help="Path to the saved model file (model.pt)", required=True)
+    parser.add_argument("--repo-id", help="The repository ID to upload the model to", required=True)
     return parser
 
 
 if __name__ == "__main__":
     parser = get_args_parser()
     args = parser.parse_args()
+
     main(args)

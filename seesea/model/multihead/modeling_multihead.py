@@ -1,12 +1,9 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
-from transformers import PreTrainedModel, PretrainedConfig, AutoModelForImageClassification, AutoModel
+from transformers import PreTrainedModel, AutoModel, PretrainedConfig
 import os
-
 from enum import Enum, auto
-from dataclasses import dataclass
-from typing import List
 
 SIN_INDEX = 0
 COS_INDEX = 1
@@ -73,15 +70,21 @@ class OutputHead(nn.Module):
 
 
 class MultiHeadConfig(PretrainedConfig):
+    """Configuration for the multi-head regression model"""
+
     model_type = "multihead_regression"
 
-    def __init__(self, base_model_name="microsoft/swin-tiny-patch4-window7-224", output_head_names=None, **kwargs):
+    def __init__(self, base_model_name=None, output_head_names=None, **kwargs):
         super().__init__(**kwargs)
         self.base_model_name = base_model_name
         self.output_head_names = output_head_names if output_head_names is not None else []
 
 
 class MultiHeadModel(PreTrainedModel):
+    """Multi-head regression model"""
+
+    config_class = MultiHeadConfig
+
     def __init__(self, config):
         super().__init__(config)
 
@@ -113,7 +116,7 @@ class MultiHeadModel(PreTrainedModel):
         logits = torch.cat(all_outputs, dim=1)
 
         loss = None
-        if self.training and labels is not None:
+        if labels is not None:
             # Assume labels shape [batch_size, len(self.heads) + 1]
             full_label_mask = ~torch.isnan(labels)
             head_label_mask = full_label_mask[:, : len(self.heads)]
@@ -161,34 +164,23 @@ class MultiHeadModel(PreTrainedModel):
         model_path = os.path.join(pretrained_model_name_or_path, "pytorch_model.bin")
         state_dict = torch.load(model_path, weights_only=True)
 
-        # Remove the "base_model.swin." prefix from keys and fix head names
-        # This is just a hack to bridge the gap between the old model format and the new one
-        cleaned_state_dict = {}
-        for key, value in state_dict.items():
-            if key.startswith("base_model.swin."):
-                new_key = key.replace("base_model.swin.", "backbone.")
-                cleaned_state_dict[new_key] = value
-            elif key.startswith("heads."):
-                # Convert "heads.0.weight" to "heads.0.output_layer.weight"
-                parts = key.split(".")
-                if len(parts) == 3:  # matches pattern "heads.{num}.{weight/bias}"
-                    new_key = f"{parts[0]}.{parts[1]}.output_layer.{parts[2]}"
-                    cleaned_state_dict[new_key] = value
-            else:
-                cleaned_state_dict[key] = value
-
         # Load the state dict
-        model.load_state_dict(cleaned_state_dict)
+        model.load_state_dict(state_dict)
 
         return model
 
-    def save_pretrained(self, save_directory):
+    def save_pretrained(self, save_directory, state_dict=None, safe_serialization=True, **kwargs):
         """Save the model to a directory"""
         if not os.path.exists(save_directory):
             os.makedirs(save_directory)
 
+        # Use provided state dict or get current one
+        if state_dict is None:
+            state_dict = self.state_dict()
+
         # Save the model state dict
         model_path = os.path.join(save_directory, "pytorch_model.bin")
-        torch.save(self.state_dict(), model_path)
+        torch.save(state_dict, model_path)
+
         # Save the config
         self.config.save_pretrained(save_directory)

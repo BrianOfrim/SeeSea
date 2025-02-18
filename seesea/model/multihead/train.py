@@ -13,7 +13,6 @@ from torchvision import transforms
 from datasets import load_dataset
 from transformers import (
     AutoImageProcessor,
-    AutoModelForImageClassification,
     TrainingArguments,
     Trainer,
     DefaultDataCollator,
@@ -21,7 +20,7 @@ from transformers import (
 import evaluate
 import torch
 
-from seesea.model.multihead.multihead_model import MultiHeadModel
+from seesea.model.multihead.modeling_multihead import MultiHeadModel, MultiHeadConfig
 
 LOGGER = logging.getLogger(__name__)
 
@@ -200,12 +199,13 @@ def main(args):
     total_steps = steps_per_epoch * args.epochs
 
     if args.checkpoint is None:
+        config = MultiHeadConfig(output_head_names=args.output_names, base_model_name=args.model)
         image_processor = AutoImageProcessor.from_pretrained(args.model)
-        # Save the image processor to the output directory
-        image_processor.save_pretrained(output_dir)
+        model = MultiHeadModel(config)
 
-        base_model = AutoModelForImageClassification.from_pretrained(args.model, ignore_mismatched_sizes=True)
-        model = MultiHeadModel(base_model, args.output_names)
+        # Save the config and image processor to the output directory
+        config.save_pretrained(output_dir)
+        image_processor.save_pretrained(output_dir)
 
         training_args = TrainingArguments(
             output_dir=output_dir,
@@ -223,10 +223,13 @@ def main(args):
             logging_strategy="steps",
             logging_steps=50,
             max_steps=total_steps,
+            save_safetensors=False,
         )
     else:
+        config = MultiHeadConfig.from_pretrained(output_dir)
         image_processor = AutoImageProcessor.from_pretrained(output_dir)
-        model = torch.load(os.path.join(args.checkpoint))
+        model = MultiHeadModel.from_pretrained(args.checkpoint, config=config)
+
         training_args = torch.load(os.path.join(args.checkpoint, "training_args.bin"))
         training_args.ignore_data_skip = True
 
@@ -235,7 +238,7 @@ def main(args):
         augmentation = transforms.RandomRotation(args.rotation, interpolation=transforms.InterpolationMode.BILINEAR)
         LOGGER.info("Using random rotation of %.2f degrees for data augmentation", args.rotation)
 
-    map_fn = partial(preprocess_batch, image_processor, args.output_names)
+    map_fn = partial(preprocess_batch, image_processor, config.output_head_names)
 
     full_dataset = load_dataset("webdataset", data_dir=args.input, streaming=True)
 
@@ -268,19 +271,14 @@ def main(args):
         data_collator=data_collator,
         train_dataset=train_ds,
         eval_dataset=val_ds,
-        compute_metrics=partial(compute_metrics, mae_metric, args.output_names, metric_stats),
+        compute_metrics=partial(compute_metrics, mae_metric, config.output_head_names, metric_stats),
     )
 
     trainer.train(resume_from_checkpoint=args.checkpoint)
 
     # save the model
-    torch.save(model, os.path.join(output_dir, "model.pt"))
+    model.save_pretrained(output_dir)
     LOGGER.info("Model saved successfully to %s", output_dir)
-
-    # save the output name
-    output_names_path = os.path.join(output_dir, "output_names.txt")
-    with open(output_names_path, "w", encoding="utf-8") as output_names_file:
-        output_names_file.write("\n".join(args.output_names))
 
     # run the test set
     test_ds = full_dataset["test"].map(map_fn, batched=True).select_columns(["labels", "pixel_values"])

@@ -3,8 +3,8 @@
 import argparse
 import torch
 from datasets import load_dataset
-from transformers import AutoImageProcessor, AutoModelForImageClassification
-from seesea.model.multihead.multihead_model import MultiHeadModel, MultiHeadConfig
+from transformers import AutoImageProcessor
+from seesea.model.multihead.modeling_multihead import MultiHeadModel, MultiHeadConfig
 import matplotlib.pyplot as plt
 
 
