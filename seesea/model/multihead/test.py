@@ -17,8 +17,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
-from seesea.model.multihead.multihead_model import MultiHeadModel  # Import the model class
-
+from seesea.model.multihead.modeling_multihead import MultiHeadModel, MultiHeadConfig
 import warnings
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
@@ -102,18 +101,14 @@ def save_results(labels, predictions, output_dir):
 def main(args):
     """Run test on multihead model"""
 
-    # Load model and processor
-    model = torch.load(os.path.join(args.model_dir, "model.pt"))
-    image_processor = AutoImageProcessor.from_pretrained(os.path.join(args.model_dir))
+    config = MultiHeadConfig.from_pretrained(args.model_dir)
+    image_processor = AutoImageProcessor.from_pretrained(args.model_dir)
+    model = MultiHeadModel.from_pretrained(args.model_dir, config=config)
 
-    # Get output names
-    with open(os.path.join(args.model_dir, "output_names.txt"), "r", encoding="utf-8") as f:
-        output_names = f.read().strip().split("\n")
-
-    LOGGER.info("Testing model for outputs: %s", output_names)
+    LOGGER.info("Testing model for outputs: %s", config.output_head_names)
 
     # Setup dataset
-    map_fn = partial(preprocess_batch, image_processor, output_names)
+    map_fn = partial(preprocess_batch, image_processor, config.output_head_names)
     dataset = load_dataset("webdataset", data_dir=args.dataset, split=args.split, streaming=True)
     dataset = dataset.map(map_fn, batched=True).select_columns(["labels", "pixel_values"])
 
@@ -132,8 +127,8 @@ def main(args):
     model = model.to(device)
 
     # Run test
-    all_outputs = {name: [] for name in output_names}
-    all_inputs = {name: [] for name in output_names}
+    all_outputs = {name: [] for name in config.output_head_names}
+    all_inputs = {name: [] for name in config.output_head_names}
 
     test_start_time = datetime.datetime.now(tz=datetime.timezone.utc)
 
@@ -141,16 +136,16 @@ def main(args):
     for batch in tqdm(loader, desc="Testing", disable=LOGGER.level > logging.INFO):
         # Split batch labels into separate arrays for each output
         batch_labels = batch["labels"].numpy()
-        for i, name in enumerate(output_names):
+        for i, name in enumerate(config.output_head_names):
             all_inputs[name].append(batch_labels[:, i])
 
         batch = {k: v.to(device) for k, v in batch.items()}
         with torch.no_grad():
-            _, logits = model(**batch)
+            outputs = model(**batch)
 
         # Split predictions into separate arrays for each output
-        predictions = logits.cpu().numpy()
-        for i, name in enumerate(output_names):
+        predictions = outputs["logits"].cpu().numpy()
+        for i, name in enumerate(config.output_head_names):
             all_outputs[name].append(predictions[:, i])
 
     test_end_time = datetime.datetime.now(tz=datetime.timezone.utc)
