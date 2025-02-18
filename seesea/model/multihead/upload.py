@@ -12,7 +12,7 @@ def main(args):
 
     # Register the model and config
 
-    AutoConfig.register("multihead_regression", MultiHeadConfig)
+    AutoConfig.register("multihead-regression", MultiHeadConfig)
     AutoModel.register(MultiHeadConfig, MultiHeadModel)
 
     MultiHeadConfig.register_for_auto_class()

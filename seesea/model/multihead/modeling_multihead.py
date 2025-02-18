@@ -72,7 +72,7 @@ class OutputHead(nn.Module):
 class MultiHeadConfig(PretrainedConfig):
     """Configuration for the multi-head regression model"""
 
-    model_type = "multihead_regression"
+    model_type = "multihead-regression"
 
     def __init__(self, base_model_name=None, output_head_names=None, **kwargs):
         super().__init__(**kwargs)
@@ -149,25 +149,6 @@ class MultiHeadModel(PreTrainedModel):
     def get_output_head_names(self):
         """Returns list of output head names"""
         return self.config.output_head_names
-
-    @classmethod
-    def from_pretrained(cls, pretrained_model_name_or_path, *model_args, **kwargs):
-        """Load from pretrained"""
-        config = kwargs.pop("config", None)
-
-        if config is None:
-            raise ValueError("config must be provided")
-
-        model = cls(config)
-
-        # Load the model state dict
-        model_path = os.path.join(pretrained_model_name_or_path, "pytorch_model.bin")
-        state_dict = torch.load(model_path, weights_only=True)
-
-        # Load the state dict
-        model.load_state_dict(state_dict)
-
-        return model
 
     def save_pretrained(self, save_directory, state_dict=None, safe_serialization=True, **kwargs):
         """Save the model to a directory"""

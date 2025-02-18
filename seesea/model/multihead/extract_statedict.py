@@ -1,6 +1,6 @@
 import torch
 import argparse
-import seesea.model.multihead.multihead_model
+import seesea.model.multihead.modeling_multihead
 import os
 
 

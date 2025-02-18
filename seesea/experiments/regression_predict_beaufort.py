@@ -15,7 +15,7 @@ from tqdm import tqdm
 from datasets import load_dataset
 from transformers import AutoImageProcessor, DefaultDataCollator
 
-from seesea.model.multihead.multihead_model import MultiHeadModel  # Import the model class
+from seesea.model.multihead.modeling_multihead import MultiHeadModel  # Import the model class
 from seesea.model.beaufort.beaufort_utils import mps_to_beaufort
 
 LOGGER = logging.getLogger(__name__)

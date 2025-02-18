@@ -1,27 +1,21 @@
 """A script to download a model from the Hugging Face Hub."""
 
 import argparse
-import os
-import torch
-from huggingface_hub import HfApi
-from transformers import AutoImageProcessor, AutoModel
+from seesea.model.multihead.modeling_multihead import (
+    MultiHeadModel,
+    MultiHeadConfig,
+)
 
 
 def main(args):
-    api = HfApi()
-    # api.download_folder(repo_id=args.repo_id, local_dir=args.local_dir)
-
-    # Download the model
-    model = AutoModel.from_pretrained(args.repo_id)
-    # image_processor = AutoImageProcessor.from_pretrained(args.repo_id)
-
-    return model
+    config = MultiHeadConfig.from_pretrained(args.repo_id, trust_remote_code=True)
+    model = MultiHeadModel.from_pretrained(args.repo_id, config=config, trust_remote_code=True)
+    print(model)
 
 
 def get_args_parser():
     parser = argparse.ArgumentParser(description="Download a model from the Hugging Face Hub")
-    parser.add_argument("--repo-id", type=str, help="The repository ID to download the model from.")
-    parser.add_argument("--local-dir", type=str, help="The local directory to save the model to.")
+    parser.add_argument("--repo-id", type=str, help="The repository ID to download the model from.", required=True)
     return parser
 
 
