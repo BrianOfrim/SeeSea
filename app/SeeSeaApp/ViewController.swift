@@ -22,77 +22,78 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
     func setupUI() {
         // Calculate safe area
         let safeArea = view.safeAreaLayoutGuide
-        let padding: CGFloat = 20
         
-        // Image view - takes up top portion
+        // Image view - takes up the entire screen
         imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.contentMode = .scaleAspectFit
+        imageView.contentMode = .scaleAspectFill
         imageView.backgroundColor = .lightGray
-        imageView.layer.cornerRadius = 8
         imageView.clipsToBounds = true
         view.addSubview(imageView)
+        
+        // Semi-transparent overlay for prediction text
+        predictionLabel = UILabel()
+        predictionLabel.translatesAutoresizingMaskIntoConstraints = false
+        predictionLabel.numberOfLines = 0
+        predictionLabel.textAlignment = .left
+        predictionLabel.textColor = .white
+        predictionLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        
+        // Create semi-transparent background for the label
+        let overlayView = UIView()
+        overlayView.translatesAutoresizingMaskIntoConstraints = false
+        overlayView.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        overlayView.layer.cornerRadius = 6
+        
+        imageView.addSubview(overlayView)
+        overlayView.addSubview(predictionLabel)
         
         // Activity indicator
         activityIndicator = UIActivityIndicatorView(style: .large)
         activityIndicator.translatesAutoresizingMaskIntoConstraints = false
         activityIndicator.hidesWhenStopped = true
-        view.addSubview(activityIndicator)
+        activityIndicator.color = .white
+        imageView.addSubview(activityIndicator)
         
-        // Prediction label
-        predictionLabel = UILabel()
-        predictionLabel.translatesAutoresizingMaskIntoConstraints = false
-        predictionLabel.numberOfLines = 0
-        predictionLabel.textAlignment = .center
-        predictionLabel.backgroundColor = .systemGray6
-        predictionLabel.layer.cornerRadius = 8
-        predictionLabel.clipsToBounds = true
-        predictionLabel.font = UIFont.systemFont(ofSize: 18, weight: .medium)
-        predictionLabel.text = "Prediction will appear here"
-        predictionLabel.layer.borderWidth = 1
-        predictionLabel.layer.borderColor = UIColor.black.cgColor
-        view.addSubview(predictionLabel)
+        // Select image button - now floating at the bottom of the screen
+        let selectButton = UIButton(type: .system)
+        selectButton.translatesAutoresizingMaskIntoConstraints = false
+        selectButton.setTitle("Select Image", for: .normal)
+        selectButton.backgroundColor = UIColor.systemBlue.withAlphaComponent(0.7)
+        selectButton.setTitleColor(.white, for: .normal)
+        selectButton.layer.cornerRadius = 20
+        selectButton.contentEdgeInsets = UIEdgeInsets(top: 10, left: 20, bottom: 10, right: 20)
+        selectButton.addTarget(self, action: #selector(openPhotoLibrary), for: .touchUpInside)
+        view.addSubview(selectButton)
         
-        // Button
-        let button = UIButton(type: .system)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        button.setTitle("Pick an Image", for: .normal)
-        button.backgroundColor = .systemBlue
-        button.setTitleColor(.white, for: .normal)
-        button.layer.cornerRadius = 8
-        button.addTarget(self, action: #selector(openPhotoLibrary), for: .touchUpInside)
-        button.layer.borderWidth = 1  // Debug border
-        button.layer.borderColor = UIColor.black.cgColor
-        view.addSubview(button)
-        
-        // Set up constraints with fixed heights
         NSLayoutConstraint.activate([
-            // Image view - fixed height of 250
-            imageView.topAnchor.constraint(equalTo: safeArea.topAnchor, constant: padding),
-            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: padding),
-            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -padding),
-            imageView.heightAnchor.constraint(equalToConstant: 250),
+            // Image view constraints - fill the entire view
+            imageView.topAnchor.constraint(equalTo: view.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             
-            // Activity indicator centered in image view
+            // Select button constraints - floating at the bottom
+            selectButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            selectButton.bottomAnchor.constraint(equalTo: safeArea.bottomAnchor, constant: -20),
+            
+            // Overlay view constraints - position in top left corner with padding
+            overlayView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: 12),
+            overlayView.topAnchor.constraint(equalTo: safeArea.topAnchor, constant: 12),
+            overlayView.widthAnchor.constraint(lessThanOrEqualTo: imageView.widthAnchor, multiplier: 0.7),
+            
+            // Prediction label constraints - inside the overlay with padding
+            predictionLabel.topAnchor.constraint(equalTo: overlayView.topAnchor, constant: 6),
+            predictionLabel.bottomAnchor.constraint(equalTo: overlayView.bottomAnchor, constant: -6),
+            predictionLabel.leadingAnchor.constraint(equalTo: overlayView.leadingAnchor, constant: 8),
+            predictionLabel.trailingAnchor.constraint(equalTo: overlayView.trailingAnchor, constant: -8),
+            
+            // Activity indicator constraints
             activityIndicator.centerXAnchor.constraint(equalTo: imageView.centerXAnchor),
-            activityIndicator.centerYAnchor.constraint(equalTo: imageView.centerYAnchor),
-            
-            // Prediction label - fixed height of 80
-            predictionLabel.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: padding),
-            predictionLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: padding),
-            predictionLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -padding),
-            predictionLabel.heightAnchor.constraint(equalToConstant: 80),
-            
-            // Button - fixed height of 50, with bottom constraint to ensure it's visible
-            button.topAnchor.constraint(equalTo: predictionLabel.bottomAnchor, constant: padding),
-            button.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: padding),
-            button.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -padding),
-            button.heightAnchor.constraint(equalToConstant: 50),
-            button.bottomAnchor.constraint(lessThanOrEqualTo: safeArea.bottomAnchor, constant: -padding)
+            activityIndicator.centerYAnchor.constraint(equalTo: imageView.centerYAnchor)
         ])
         
-        // Print view frame for debugging
-        print("View frame: \(view.frame)")
+        overlayView.isHidden = true  // Initially hide the overlay
     }
 
     override func viewDidLayoutSubviews() {
@@ -109,6 +110,9 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         picker.delegate = self
         picker.allowsEditing = true
         present(picker, animated: true)
+        
+        // Hide the overlay when selecting a new image
+        predictionLabel.superview?.isHidden = true
     }
 
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
@@ -141,16 +145,17 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                     
                     self.predictionLabel.text = String(format: "Wave Height: %.1f m\nWind Speed: %.1f m/s",
                                                 wave_height_m, wind_speed_mps)
-                    print("Updated label with: \(self.predictionLabel.text ?? "nil")")
+                    self.predictionLabel.superview?.isHidden = false
                 } else {
                     self.predictionLabel.text = "Invalid prediction result"
+                    self.predictionLabel.superview?.isHidden = false
                 }
             }
         } catch {
             DispatchQueue.main.async {
                 self.activityIndicator.stopAnimating()
-                self.predictionLabel.text = "Prediction failed: \(error.localizedDescription)"
-                print("Error: \(error.localizedDescription)")
+                self.predictionLabel.text = "Prediction failed"
+                self.predictionLabel.superview?.isHidden = false
             }
         }
     }
