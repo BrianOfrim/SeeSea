@@ -56,28 +56,6 @@ def get_image_from_sample(sample, image_key):
     raise ValueError(f"Could not find image in sample using key '{image_key}'")
 
 
-def process_outputs(outputs):
-    processed = {}
-
-    for name, output in outputs.items():
-        if name.endswith("_sin"):
-            # Get the base name without _sin
-            base_name = name[:-4]
-            if base_name.endswith("deg"):
-                # Find corresponding cos output
-                cos_name = f"{base_name}_cos"
-                if cos_name in outputs:
-                    # Convert sin/cos back to degrees
-                    sin_val = outputs[name]
-                    cos_val = outputs[cos_name]
-                    angle_rad = torch.atan2(sin_val, cos_val)
-                    processed[base_name] = torch.rad2deg(angle_rad)
-        elif not name.endswith("_cos"):  # Skip cos components as they're handled with sin
-            processed[name] = output
-
-    return processed
-
-
 def main(args):
     # Load model, image processor, and config (which contains label mappings)
     model = AutoModelForSemanticSegmentation.from_pretrained(args.model)
