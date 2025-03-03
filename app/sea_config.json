@@ -1,0 +1,10 @@
+{
+  "consider_as_sea": [
+    "sea",
+    "lake"
+  ],
+  "prevent_relabel_if_top": [
+    "sky"
+  ],
+  "confidence_threshold": 0.02
+}

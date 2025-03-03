@@ -4,8 +4,10 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
     
     var imageView: UIImageView!
     private var seaPredictor: SeaPredictor?
+    private var seaDetector: SeaDetector?
     private var predictionLabel: UILabel!
     private var activityIndicator: UIActivityIndicatorView!
+    private var segmentControl: UISegmentedControl!
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -14,8 +16,9 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         
         do {
             seaPredictor = try SeaPredictor()
+            seaDetector = try SeaDetector()
         } catch {
-            print("Failed to initialize predictor: \(error)")
+            print("Failed to initialize models: \(error)")
         }
     }
 
@@ -30,6 +33,14 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         imageView.backgroundColor = .lightGray
         imageView.clipsToBounds = true
         view.addSubview(imageView)
+        
+        // Segment control for switching between models
+        segmentControl = UISegmentedControl(items: ["Wave/Wind", "Sea Detection"])
+        segmentControl.translatesAutoresizingMaskIntoConstraints = false
+        segmentControl.selectedSegmentIndex = 0
+        segmentControl.backgroundColor = UIColor.white.withAlphaComponent(0.7)
+        segmentControl.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
+        view.addSubview(segmentControl)
         
         // Semi-transparent overlay for prediction text
         predictionLabel = UILabel()
@@ -73,13 +84,18 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
             imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             
+            // Segment control - at the top
+            segmentControl.topAnchor.constraint(equalTo: safeArea.topAnchor, constant: 12),
+            segmentControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            segmentControl.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.8),
+            
             // Select button constraints - floating at the bottom
             selectButton.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             selectButton.bottomAnchor.constraint(equalTo: safeArea.bottomAnchor, constant: -20),
             
             // Overlay view constraints - position in top left corner with padding
             overlayView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: 12),
-            overlayView.topAnchor.constraint(equalTo: safeArea.topAnchor, constant: 12),
+            overlayView.topAnchor.constraint(equalTo: segmentControl.bottomAnchor, constant: 12),
             overlayView.widthAnchor.constraint(lessThanOrEqualTo: imageView.widthAnchor, multiplier: 0.7),
             
             // Prediction label constraints - inside the overlay with padding
@@ -140,11 +156,11 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                 self.activityIndicator.stopAnimating()
                 
                 if let predictions = predictions, predictions.count >= 2 {
-                    let wave_height_m = predictions[0]
-                    let wind_speed_mps = predictions[1]
+                    let wind_speed_mps = predictions[0]
+                    let wave_height_m = predictions[1]
                     
-                    self.predictionLabel.text = String(format: "Wave Height: %.1f m\nWind Speed: %.1f m/s",
-                                                wave_height_m, wind_speed_mps)
+                    self.predictionLabel.text = String(format: "Wind Speed: %.1f m/s\nWave Height: %.1f m",
+                                                wind_speed_mps, wave_height_m)
                     self.predictionLabel.superview?.isHidden = false
                 } else {
                     self.predictionLabel.text = "Invalid prediction result"
@@ -155,6 +171,47 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
             DispatchQueue.main.async {
                 self.activityIndicator.stopAnimating()
                 self.predictionLabel.text = "Prediction failed"
+                self.predictionLabel.superview?.isHidden = false
+            }
+        }
+    }
+
+    @objc func segmentChanged(_ sender: UISegmentedControl) {
+        if let image = imageView.image {
+            predictionLabel.text = "Processing..."
+            activityIndicator.startAnimating()
+            
+            DispatchQueue.global(qos: .userInitiated).async {
+                if sender.selectedSegmentIndex == 0 {
+                    // Wave/Wind prediction
+                    self.makePrediction(for: image)
+                } else {
+                    // Sea detection
+                    self.detectSea(in: image)
+                }
+            }
+        }
+    }
+
+    private func detectSea(in image: UIImage) {
+        do {
+            let (percentage, containsSea) = try seaDetector?.detectSea(in: image) ?? (0, false)
+            
+            DispatchQueue.main.async {
+                self.activityIndicator.stopAnimating()
+                
+                if containsSea {
+                    self.predictionLabel.text = "Sea detected. Percentage: \(percentage * 100)%"
+                    self.predictionLabel.superview?.isHidden = false
+                } else {
+                    self.predictionLabel.text = "No sea detected"
+                    self.predictionLabel.superview?.isHidden = false
+                }
+            }
+        } catch {
+            DispatchQueue.main.async {
+                self.activityIndicator.stopAnimating()
+                self.predictionLabel.text = "Detection failed"
                 self.predictionLabel.superview?.isHidden = false
             }
         }

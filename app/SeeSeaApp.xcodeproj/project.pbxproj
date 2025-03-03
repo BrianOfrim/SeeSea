@@ -8,11 +8,15 @@
 
 /* Begin PBXBuildFile section */
 		D33B277D2D70119600771401 /* regression_model.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = D33B277C2D70119600771401 /* regression_model.mlpackage */; };
+		D33B27832D73E51400771401 /* sea_config.json in Resources */ = {isa = PBXBuildFile; fileRef = D33B27812D73E51400771401 /* sea_config.json */; };
+		D33B27842D73E51400771401 /* sea_segmentation_base.mlpackage in Sources */ = {isa = PBXBuildFile; fileRef = D33B27822D73E51400771401 /* sea_segmentation_base.mlpackage */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		D30A4E892D5D984600C6E66A /* SeeSeaApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SeeSeaApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D33B277C2D70119600771401 /* regression_model.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = regression_model.mlpackage; sourceTree = "<group>"; };
+		D33B27812D73E51400771401 /* sea_config.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = sea_config.json; sourceTree = "<group>"; };
+		D33B27822D73E51400771401 /* sea_segmentation_base.mlpackage */ = {isa = PBXFileReference; lastKnownFileType = folder.mlpackage; path = sea_segmentation_base.mlpackage; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -50,6 +54,8 @@
 		D30A4E802D5D984600C6E66A = {
 			isa = PBXGroup;
 			children = (
+				D33B27812D73E51400771401 /* sea_config.json */,
+				D33B27822D73E51400771401 /* sea_segmentation_base.mlpackage */,
 				D33B277C2D70119600771401 /* regression_model.mlpackage */,
 				D30A4E8B2D5D984600C6E66A /* SeeSeaApp */,
 				D30A4E8A2D5D984600C6E66A /* Products */,
@@ -128,6 +134,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D33B27832D73E51400771401 /* sea_config.json in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -138,6 +145,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D33B27842D73E51400771401 /* sea_segmentation_base.mlpackage in Sources */,
 				D33B277D2D70119600771401 /* regression_model.mlpackage in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

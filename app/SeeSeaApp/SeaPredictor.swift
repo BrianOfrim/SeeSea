@@ -87,8 +87,8 @@ class SeaPredictor {
         }
         
         if result.count >= 2 {
-            print("Wave Height: \(result[0]) meters")
-            print("Wind Speed: \(result[1]) m/s")
+            print("[SeaPredictor] Wind Speed: \(result[0]) m/s")
+            print("[SeaPredictor] Wave Height: \(result[1]) meters")
         }
         
         return result
