@@ -7,6 +7,8 @@ from transformers import AutoImageProcessor
 from seesea.model.multihead.modeling_multihead import MultiHeadConfig
 import matplotlib.pyplot as plt
 import coremltools as ct
+import numpy as np
+from PIL import Image
 
 
 def main(args):
@@ -28,15 +30,55 @@ def main(args):
         labels = [sample["json"].get(name) for name in config.output_head_names]
         image_name = sample["__key__"]
 
-        transformed_image = image_processor(image)
-        transformed_image = transformed_image["pixel_values"]
+        print(f"\nProcessing image: {image_name}")
+        print(f"Original image size: {image.size}")
+        print(f"Original image mode: {image.mode}")  # Check if RGB, RGBA, etc.
 
-        predictions = coreml_model.predict({"pixel_values": transformed_image})
+        # Get raw pixel values of first few pixels before any processing
+        raw_pixels = list(image.getdata())[:5]
+        print(f"First 5 raw pixels (RGB): {raw_pixels}")
+
+        # Print first pixel in detail
+        r, g, b = raw_pixels[0]
+        print(f"First pixel raw values (RGB):")
+        print(f"R: {r}")
+        print(f"G: {g}")
+        print(f"B: {b}")
+
+        # Get the actual transformation steps
+        print("\nApplying transformations...")
+        transformed_image = image_processor(image)
+
+        # Create a copy for logging
+        debug_image = np.array(transformed_image["pixel_values"])
+        print(f"\nTransformed shape: {debug_image.shape}")
+        print("\nFirst pixel normalized values (RGB):")
+        print(f"R: {debug_image[0,0,0,0]:.6f}")
+        print(f"G: {debug_image[0,1,0,0]:.6f}")
+        print(f"B: {debug_image[0,2,0,0]:.6f}")
+
+        # Print first few values of each channel
+        print("\nFirst few values of each channel:")
+        for c in range(3):
+            channel = ["R", "G", "B"][c]
+            values = debug_image[0, c, 0, :5]
+            print(f"{channel}: {[f'{v:.6f}' for v in values]}")
+
+        # Calculate the normalized values manually to verify
+        print("\nManually calculated normalized values for first pixel:")
+        r_norm = ((r / 255.0) - 0.485) / 0.229
+        g_norm = ((g / 255.0) - 0.456) / 0.224
+        b_norm = ((b / 255.0) - 0.406) / 0.225
+        print(f"R: {r_norm:.6f}")
+        print(f"G: {g_norm:.6f}")
+        print(f"B: {b_norm:.6f}")
+
+        predictions = coreml_model.predict({"pixel_values": transformed_image["pixel_values"]})
 
         outputs = predictions["predictions"].squeeze()
-        print(f"Image: {image_name}")
+        print(f"\nPredictions:")
         for name, pred, target in zip(config.output_head_names, outputs, labels):
-            print(f"  {name}: Predicted: {pred}, Expected: {target}, Diff: {pred - target}")
+            print(f"  {name}: Predicted: {pred:.6f}, Expected: {target:.6f}, Diff: {pred - target:.6f}")
 
         if args.show_images:
             # show the image with the predicted and expected values

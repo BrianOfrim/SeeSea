@@ -170,61 +170,8 @@ class SeaDetector {
     // MARK: - Private Methods
     
     private func preprocessImage(_ image: UIImage) throws -> MLMultiArray {
-        // Resize image to model input dimensions
-        guard let resizedImage = image.resize(to: CGSize(width: inputWidth, height: inputHeight)),
-              let cgImage = resizedImage.cgImage else {
-            throw SeaDetectorError.preprocessingFailed
-        }
-        
-        // Create a multi-array with shape [1, 3, height, width]
-        let multiArray = try MLMultiArray(shape: [1, 3, NSNumber(value: inputHeight), NSNumber(value: inputWidth)],
-                                         dataType: .float32)
-        
-        // Get pixel data
-        let bytesPerPixel = 4
-        let bytesPerRow = bytesPerPixel * inputWidth
-        let bitsPerComponent = 8
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
-        
-        var pixelData = [UInt8](repeating: 0, count: inputHeight * bytesPerRow)
-        
-        guard let context = CGContext(data: &pixelData,
-                                     width: inputWidth,
-                                     height: inputHeight,
-                                     bitsPerComponent: bitsPerComponent,
-                                     bytesPerRow: bytesPerRow,
-                                     space: colorSpace,
-                                     bitmapInfo: bitmapInfo) else {
-            throw SeaDetectorError.preprocessingFailed
-        }
-        
-        // Draw the image in the context
-        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: inputWidth, height: inputHeight))
-        
-        // Fill the multi-array with normalized pixel values
-        for y in 0..<inputHeight {
-            for x in 0..<inputWidth {
-                let pixelIndex = y * bytesPerRow + x * bytesPerPixel
-                
-                // Extract RGB values
-                let r = Float(pixelData[pixelIndex]) / 255.0
-                let g = Float(pixelData[pixelIndex + 1]) / 255.0
-                let b = Float(pixelData[pixelIndex + 2]) / 255.0
-                
-                // Normalize using ImageNet mean and std (used by SegFormer)
-                let normalizedR = (r - 0.485) / 0.229
-                let normalizedG = (g - 0.456) / 0.224
-                let normalizedB = (b - 0.406) / 0.225
-                
-                // Set values in the multi-array (CHW format)
-                multiArray[[0, 0, y, x] as [NSNumber]] = NSNumber(value: normalizedR)
-                multiArray[[0, 1, y, x] as [NSNumber]] = NSNumber(value: normalizedG)
-                multiArray[[0, 2, y, x] as [NSNumber]] = NSNumber(value: normalizedB)
-            }
-        }
-        
-        return multiArray
+        // Use the shared preprocessing method
+        return try image.preprocessForML(targetSize: CGSize(width: inputWidth, height: inputHeight))
     }
     
     private func convertMultiArrayToArray(_ multiArray: MLMultiArray) -> [[[[Float]]]] {
