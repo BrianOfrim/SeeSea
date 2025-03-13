@@ -51,12 +51,16 @@ extension UIImage {
         )
     
         // Print the format of the cgImage
-        print("CGImage format: \(self.cgImage?.bitmapInfo.rawValue)")
+        if let bitmapInfo = self.cgImage?.bitmapInfo.rawValue {
+            print("CGImage format: \(bitmapInfo)")
+        } else {
+            print("CGImage format: unknown")
+        }
         
         context?.draw(self.cgImage!, in: CGRect(x: 0, y: 0, width: width, height: height))
         
         // Debug: Print first few raw pixel values
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        _ = CVPixelBufferGetBytesPerRow(buffer)
         let baseAddress = CVPixelBufferGetBaseAddress(buffer)!
         let bufferPtr = baseAddress.assumingMemoryBound(to: UInt8.self)
         

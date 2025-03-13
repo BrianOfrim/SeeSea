@@ -29,10 +29,18 @@ class BaseSegmentationWrapper(nn.Module):
 
 
 def main(args):
+    # Apply custom input size if specified
+    processor_kwargs = {}
+    if args.image_size is not None:
+        processor_kwargs["size"] = {"height": args.image_size, "width": args.image_size}
+        print(f"Using custom input size: {args.image_size}x{args.image_size}")
+
+    # Load the image processor with optional custom size
+    image_processor = AutoImageProcessor.from_pretrained(args.model, **processor_kwargs)
+
     # Load model, image processor, and config
     print(f"Loading model from {args.model}")
     model = AutoModelForSemanticSegmentation.from_pretrained(args.model)
-    image_processor = AutoImageProcessor.from_pretrained(args.model)
     config = AutoConfig.from_pretrained(args.model)
 
     # Create a simple wrapper that returns just the logits
@@ -106,6 +114,12 @@ def parse_args():
         type=float,
         default=0.02,
         help="Confidence threshold for relabeling pixels as sea (saved in config)",
+    )
+    parser.add_argument(
+        "--image-size",
+        type=int,
+        default=None,
+        help="Size to resize input images (both height and width). If not specified, uses model default.",
     )
     return parser.parse_args()
 

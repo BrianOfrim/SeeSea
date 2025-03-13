@@ -39,7 +39,11 @@ class SeaPredictor {
         print("Starting prediction process...")
 
         // Print the format of the original image
-        print("Original image format: \(image.cgImage?.bitmapInfo.rawValue)")
+        if let bitmapInfo = image.cgImage?.bitmapInfo.rawValue {
+            print("Original image format: \(bitmapInfo)")
+        } else {
+            print("Original image format: unknown")
+        }
         
         // Resize image to 224x224 (matching the model's input size)
         let targetSize = CGSize(width: 224, height: 224)

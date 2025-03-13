@@ -60,8 +60,8 @@ class SeaDetector {
         let modelDescription = model.modelDescription
         if let inputFeatureDescription = modelDescription.inputDescriptionsByName["pixel_values"],
            let multiArrayConstraint = inputFeatureDescription.multiArrayConstraint {
-            self.inputHeight = Int(multiArrayConstraint.shape[2])
-            self.inputWidth = Int(multiArrayConstraint.shape[3])
+            self.inputHeight = Int(truncating: multiArrayConstraint.shape[2])
+            self.inputWidth = Int(truncating: multiArrayConstraint.shape[3])
             print("Model input dimensions: \(inputWidth)x\(inputHeight)")
         } else {
             // Default to 512x512 if we can't determine from the model
@@ -207,24 +207,6 @@ class SeaDetector {
         let height = logits[0][0].count
         let width = logits[0][0][0].count
         
-        // Compute the original prediction segmentation mask
-        var originalPredSeg = [[Int]](repeating: [Int](repeating: 0, count: width), count: height)
-        for h in 0..<height {
-            for w in 0..<width {
-                var maxClassIndex = 0
-                var maxValue = logits[0][0][h][w]
-                
-                for c in 1..<numClasses {
-                    if logits[0][c][h][w] > maxValue {
-                        maxValue = logits[0][c][h][w]
-                        maxClassIndex = c
-                    }
-                }
-                
-                originalPredSeg[h][w] = maxClassIndex
-            }
-        }
-        
         // Apply softmax to get probabilities
         var probabilities = [[[Float]]](repeating: [[Float]](repeating: [Float](repeating: 0, count: width), count: height), count: numClasses)
         
@@ -251,37 +233,31 @@ class SeaDetector {
             }
         }
         
-        // Get top n predictions
-        let nTop = 10
-        var topIndices = [[[Int]]](repeating: [[Int]](repeating: [Int](repeating: 0, count: width), count: height), count: nTop)
-        var topProbs = [[[Float]]](repeating: [[Float]](repeating: [Float](repeating: 0, count: width), count: height), count: nTop)
-        
+        // Get the argmax for each pixel (top prediction)
+        var topPredictions = [[Int]](repeating: [Int](repeating: 0, count: width), count: height)
         for h in 0..<height {
             for w in 0..<width {
-                // Create array of (value, index) pairs
-                var valueIndexPairs = [(Float, Int)]()
-                for c in 0..<numClasses {
-                    valueIndexPairs.append((probabilities[c][h][w], c))
+                var maxClassIndex = 0
+                var maxValue = probabilities[0][h][w]
+                
+                for c in 1..<numClasses {
+                    if probabilities[c][h][w] > maxValue {
+                        maxValue = probabilities[c][h][w]
+                        maxClassIndex = c
+                    }
                 }
                 
-                // Sort by value in descending order
-                valueIndexPairs.sort { $0.0 > $1.0 }
-                
-                // Fill top n arrays
-                for i in 0..<min(nTop, numClasses) {
-                    topProbs[i][h][w] = valueIndexPairs[i].0
-                    topIndices[i][h][w] = valueIndexPairs[i].1
-                }
+                topPredictions[h][w] = maxClassIndex
             }
         }
         
-        // Create mask for pixels that should not be relabeled
+        // Create mask for pixels that should not be relabeled based on prevent_relabel_if_top
         var preventMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
         for label in preventRelabelIfTop {
             if let labelId = labelToId[label] {
                 for h in 0..<height {
                     for w in 0..<width {
-                        if originalPredSeg[h][w] == labelId {
+                        if topPredictions[h][w] == labelId {
                             preventMask[h][w] = true
                         }
                     }
@@ -293,46 +269,19 @@ class SeaDetector {
         var seaConfidenceSum = [[Float]](repeating: [Float](repeating: 0, count: width), count: height)
         for label in considerAsSea {
             if let labelId = labelToId[label] {
-                for i in 0..<nTop {
-                    for h in 0..<height {
-                        for w in 0..<width {
-                            if topIndices[i][h][w] == labelId {
-                                seaConfidenceSum[h][w] += topProbs[i][h][w]
-                            }
-                        }
+                for h in 0..<height {
+                    for w in 0..<width {
+                        seaConfidenceSum[h][w] += probabilities[labelId][h][w]
                     }
                 }
             }
         }
         
-        // Create mask where sea confidence exceeds threshold
-        var mask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
+        // Create mask where sea confidence exceeds threshold and is not in prevent_mask
+        var binaryMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
         for h in 0..<height {
             for w in 0..<width {
                 if seaConfidenceSum[h][w] > confidenceThreshold && !preventMask[h][w] {
-                    mask[h][w] = true
-                }
-            }
-        }
-        
-        // Build binary mask for sea pixels
-        var binaryMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
-        for label in considerAsSea {
-            if let labelId = labelToId[label] {
-                for h in 0..<height {
-                    for w in 0..<width {
-                        if originalPredSeg[h][w] == labelId {
-                            binaryMask[h][w] = true
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Combine masks
-        for h in 0..<height {
-            for w in 0..<width {
-                if mask[h][w] {
                     binaryMask[h][w] = true
                 }
             }
@@ -360,24 +309,6 @@ class SeaDetector {
         let height = logits[0][0].count
         let width = logits[0][0][0].count
         
-        // Compute the original prediction segmentation mask
-        var originalPredSeg = [[Int]](repeating: [Int](repeating: 0, count: width), count: height)
-        for h in 0..<height {
-            for w in 0..<width {
-                var maxClassIndex = 0
-                var maxValue = logits[0][0][h][w]
-                
-                for c in 1..<numClasses {
-                    if logits[0][c][h][w] > maxValue {
-                        maxValue = logits[0][c][h][w]
-                        maxClassIndex = c
-                    }
-                }
-                
-                originalPredSeg[h][w] = maxClassIndex
-            }
-        }
-        
         // Apply softmax to get probabilities
         var probabilities = [[[Float]]](repeating: [[Float]](repeating: [Float](repeating: 0, count: width), count: height), count: numClasses)
         
@@ -404,37 +335,31 @@ class SeaDetector {
             }
         }
         
-        // Get top n predictions
-        let nTop = 10
-        var topIndices = [[[Int]]](repeating: [[Int]](repeating: [Int](repeating: 0, count: width), count: height), count: nTop)
-        var topProbs = [[[Float]]](repeating: [[Float]](repeating: [Float](repeating: 0, count: width), count: height), count: nTop)
-        
+        // Get the argmax for each pixel (top prediction)
+        var topPredictions = [[Int]](repeating: [Int](repeating: 0, count: width), count: height)
         for h in 0..<height {
             for w in 0..<width {
-                // Create array of (value, index) pairs
-                var valueIndexPairs = [(Float, Int)]()
-                for c in 0..<numClasses {
-                    valueIndexPairs.append((probabilities[c][h][w], c))
+                var maxClassIndex = 0
+                var maxValue = probabilities[0][h][w]
+                
+                for c in 1..<numClasses {
+                    if probabilities[c][h][w] > maxValue {
+                        maxValue = probabilities[c][h][w]
+                        maxClassIndex = c
+                    }
                 }
                 
-                // Sort by value in descending order
-                valueIndexPairs.sort { $0.0 > $1.0 }
-                
-                // Fill top n arrays
-                for i in 0..<min(nTop, numClasses) {
-                    topProbs[i][h][w] = valueIndexPairs[i].0
-                    topIndices[i][h][w] = valueIndexPairs[i].1
-                }
+                topPredictions[h][w] = maxClassIndex
             }
         }
         
-        // Create mask for pixels that should not be relabeled
+        // Create mask for pixels that should not be relabeled based on prevent_relabel_if_top
         var preventMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
         for label in preventRelabelIfTop {
             if let labelId = labelToId[label] {
                 for h in 0..<height {
                     for w in 0..<width {
-                        if originalPredSeg[h][w] == labelId {
+                        if topPredictions[h][w] == labelId {
                             preventMask[h][w] = true
                         }
                     }
@@ -446,46 +371,19 @@ class SeaDetector {
         var seaConfidenceSum = [[Float]](repeating: [Float](repeating: 0, count: width), count: height)
         for label in considerAsSea {
             if let labelId = labelToId[label] {
-                for i in 0..<nTop {
-                    for h in 0..<height {
-                        for w in 0..<width {
-                            if topIndices[i][h][w] == labelId {
-                                seaConfidenceSum[h][w] += topProbs[i][h][w]
-                            }
-                        }
+                for h in 0..<height {
+                    for w in 0..<width {
+                        seaConfidenceSum[h][w] += probabilities[labelId][h][w]
                     }
                 }
             }
         }
         
-        // Create mask where sea confidence exceeds threshold
-        var mask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
+        // Create mask where sea confidence exceeds threshold and is not in prevent_mask
+        var binaryMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
         for h in 0..<height {
             for w in 0..<width {
                 if seaConfidenceSum[h][w] > confidenceThreshold && !preventMask[h][w] {
-                    mask[h][w] = true
-                }
-            }
-        }
-        
-        // Build binary mask for sea pixels
-        var binaryMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
-        for label in considerAsSea {
-            if let labelId = labelToId[label] {
-                for h in 0..<height {
-                    for w in 0..<width {
-                        if originalPredSeg[h][w] == labelId {
-                            binaryMask[h][w] = true
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Combine masks
-        for h in 0..<height {
-            for w in 0..<width {
-                if mask[h][w] {
                     binaryMask[h][w] = true
                 }
             }

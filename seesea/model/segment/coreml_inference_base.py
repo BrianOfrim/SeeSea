@@ -41,52 +41,30 @@ def apply_sea_post_processing(logits, config, sea_config):
     # Get dimensions
     _, num_classes, height, width = logits.shape
 
-    # Compute the original prediction segmentation mask
-    original_pred_seg = np.argmax(logits[0], axis=0)
-
-    # Use top n predictions to possibly relabel pixels as sea
-    n_top = 10
-
     # Apply softmax to get probabilities
     # Subtract max for numerical stability
     exp_logits = np.exp(logits[0] - np.max(logits[0], axis=0, keepdims=True))
     probabilities = exp_logits / np.sum(exp_logits, axis=0, keepdims=True)
 
-    # Get top n indices and probabilities
-    top_indices = np.argsort(-probabilities, axis=0)[:n_top]  # Shape: [n_top, height, width]
-    top_probs = np.take_along_axis(probabilities, top_indices, axis=0)  # Shape: [n_top, height, width]
+    # Get the argmax for each pixel (top prediction)
+    top_predictions = np.argmax(probabilities, axis=0)
 
-    # Create mask for pixels that should not be relabeled
+    # Create mask for pixels that should not be relabeled based on prevent_relabel_if_top
     prevent_mask = np.zeros((height, width), dtype=bool)
     for label in prevent_relabel_if_top:
         if label in label2id:
-            prevent_mask |= original_pred_seg == label2id[label]
+            prevent_mask |= top_predictions == label2id[label]
 
     # Calculate sum of probabilities for sea-related classes
     sea_confidence_sum = np.zeros((height, width), dtype=np.float32)
     for label in consider_as_sea:
         if label in label2id:
-            label_id = label2id[label]
-            for i in range(n_top):
-                label_match = top_indices[i] == label_id
-                sea_confidence_sum += top_probs[i] * label_match
+            sea_confidence_sum += probabilities[label2id[label]]
 
-    # Create mask where sea confidence exceeds threshold
-    mask = (sea_confidence_sum > confidence_threshold) & ~prevent_mask
+    # Create mask where sea confidence exceeds threshold and is not in prevent_mask
+    binary_mask = (sea_confidence_sum > confidence_threshold) & ~prevent_mask
 
-    # Build binary mask for sea pixels
-    binary_mask = np.zeros((height, width), dtype=bool)
-    for label in consider_as_sea:
-        if label in label2id:
-            binary_mask |= original_pred_seg == label2id[label]
-    binary_mask |= mask
-
-    # Compute sea percentage
-    total_pixels = binary_mask.size
-    sea_pixels = np.sum(binary_mask)
-    sea_percentage = min(max(sea_pixels / total_pixels, 0.0), 1.0)
-
-    return sea_percentage, binary_mask
+    return binary_mask
 
 
 def main(args):
@@ -143,7 +121,6 @@ def main(args):
         pixel_values = inputs["pixel_values"]
 
         # Get the model's input size
-        _, _, model_height, model_width = pixel_values.shape
         print(f"Model input shape: {pixel_values.shape}")
 
         # Run inference
@@ -154,7 +131,12 @@ def main(args):
             print(f"Logits shape: {logits.shape}")
 
             # Apply post-processing
-            sea_percentage, binary_mask = apply_sea_post_processing(logits, config, sea_config)
+            binary_mask = apply_sea_post_processing(logits, config, sea_config)
+
+            # Compute sea percentage
+            total_pixels = binary_mask.size
+            sea_pixels = np.sum(binary_mask)
+            sea_percentage = min(max(sea_pixels / total_pixels, 0.0), 1.0)
 
             # Make decision based on sea percentage
             decision = sea_percentage > args.min_sea_fraction
@@ -164,36 +146,29 @@ def main(args):
 
             # Display the image with result if requested
             if args.show_images:
-                # Create figure with two subplots
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
+                # Convert the binary mask to numpy for visualization
+                mask_np = binary_mask
 
-                # Original image
-                ax1.imshow(image)
-                ax1.set_title(f"Original: Sea {sea_percentage:.1%}")
-                ax1.axis("off")
+                # Get original image dimensions
+                original_height, original_width = image.size[::-1]  # PIL image size is (width, height)
 
-                # Resize the binary mask to match the original image dimensions
-                # Use nearest neighbor interpolation to preserve binary values
-                resized_mask = np.array(
-                    Image.fromarray(binary_mask).resize((original_width, original_height), Image.NEAREST)
-                )
+                # Resize the mask to match the original image dimensions if they're different
+                if mask_np.shape != (original_height, original_width):
+                    # Convert to PIL Image for resizing (nearest neighbor to preserve binary values)
+                    mask_pil = Image.fromarray(mask_np.astype(np.uint8) * 255)
+                    mask_pil = mask_pil.resize((original_width, original_height), Image.Resampling.NEAREST)
+                    mask_np = np.array(mask_pil) > 0  # Convert back to boolean mask
 
-                # Create overlay with the resized mask
-                ax2.imshow(image)
-                mask_overlay = np.zeros((original_height, original_width, 4), dtype=np.float32)
-                mask_overlay[resized_mask, :] = [1, 0, 0, 0.5]  # Red with 50% opacity
-                ax2.imshow(mask_overlay)
-                ax2.set_title("Sea Mask Overlay")
-                ax2.axis("off")
+                # Create overlay with red tint for sea pixels
+                overlay = np.array(image)
+                overlay[mask_np] = overlay[mask_np] * 0.5 + np.array([255, 0, 0]) * 0.5  # Red tint for sea
 
-                # Add colored border based on decision
-                border_color = "green" if decision else "red"
-                for ax in [ax1, ax2]:
-                    for spine in ax.spines.values():
-                        spine.set_color(border_color)
-                        spine.set_linewidth(5)
+                # Setup figure for display
+                fig, ax = plt.subplots(figsize=(8, 8))
+                ax.imshow(overlay)
+                ax.set_title(f"Sea Mask Overlay (Sea: {sea_percentage:.1%})")
+                ax.axis("off")
 
-                plt.tight_layout()
                 plt.show()
 
         except Exception as e:
