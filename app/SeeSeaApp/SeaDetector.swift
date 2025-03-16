@@ -12,9 +12,13 @@ class SeaDetector {
     private let labelToId: [String: Int]
     private let idToLabel: [Int: String]
     
-    // Input dimensions for the model
-    private let inputWidth: Int
-    private let inputHeight: Int
+    // Input dimensions for the model - hardcoded to 224x224
+    private let _inputWidth: Int = 224
+    private let _inputHeight: Int = 224
+    
+    // Make input dimensions accessible
+    var inputWidth: Int { return _inputWidth }
+    var inputHeight: Int { return _inputHeight }
     
     // MARK: - Initialization
     
@@ -56,19 +60,8 @@ class SeaDetector {
             throw SeaDetectorError.modelNotFound
         }
         
-        // Get model input dimensions
-        let modelDescription = model.modelDescription
-        if let inputFeatureDescription = modelDescription.inputDescriptionsByName["pixel_values"],
-           let multiArrayConstraint = inputFeatureDescription.multiArrayConstraint {
-            self.inputHeight = Int(truncating: multiArrayConstraint.shape[2])
-            self.inputWidth = Int(truncating: multiArrayConstraint.shape[3])
-            print("Model input dimensions: \(inputWidth)x\(inputHeight)")
-        } else {
-            // Default to 512x512 if we can't determine from the model
-            self.inputHeight = 512
-            self.inputWidth = 512
-            print("Using default dimensions: 512x512")
-        }
+        // No need to read input dimensions from model since we're hardcoding to 224x224
+        print("Using hardcoded model input dimensions: 224x224")
         
         // Load sea configuration
         guard let configURL = Bundle.main.url(forResource: "sea_config", withExtension: "json") else {
@@ -111,24 +104,43 @@ class SeaDetector {
     /// - Returns: A tuple containing the sea percentage and whether the image contains sea
     func detectSea(in image: UIImage, minSeaFraction: Float = 0.2) throws -> (percentage: Float, containsSea: Bool) {
         // Preprocess the image
+        let preprocessStartTime = CFAbsoluteTimeGetCurrent()
         let pixelBuffer = try preprocessImage(image)
+        let preprocessEndTime = CFAbsoluteTimeGetCurrent()
+        let preprocessTime = preprocessEndTime - preprocessStartTime
+        print("[SeaDetector] Preprocessing completed in \(String(format: "%.3f", preprocessTime)) seconds")
         
+        return try detectSea(multiArray: pixelBuffer, minSeaFraction: minSeaFraction)
+    }
+    
+    /// Detect sea percentage using a preprocessed MLMultiArray
+    /// - Parameter multiArray: The preprocessed MLMultiArray
+    /// - Returns: A tuple containing the sea percentage and whether the image contains sea
+    func detectSea(multiArray: MLMultiArray, minSeaFraction: Float = 0.2) throws -> (percentage: Float, containsSea: Bool) {
         // Create model input
-        let input = try MLDictionaryFeatureProvider(dictionary: ["pixel_values": pixelBuffer])
+        let input = try MLDictionaryFeatureProvider(dictionary: ["pixel_values": multiArray])
         
         // Run inference
+        let inferenceStartTime = CFAbsoluteTimeGetCurrent()
         let outputFeatures = try model.prediction(from: input)
+        let inferenceEndTime = CFAbsoluteTimeGetCurrent()
+        let inferenceTime = inferenceEndTime - inferenceStartTime
+        print("[SeaDetector] Model inference completed in \(String(format: "%.3f", inferenceTime)) seconds")
         
         // Get logits from output
         guard let logitsMultiArray = outputFeatures.featureValue(for: "logits")?.multiArrayValue else {
             throw SeaDetectorError.invalidOutput
         }
         
-        // Convert to a more usable format
+        // Convert to a more usable format and apply post-processing
+        let postprocessStartTime = CFAbsoluteTimeGetCurrent()
         let logits = convertMultiArrayToArray(logitsMultiArray)
         
         // Apply post-processing
         let seaPercentage = applySeaPostProcessing(logits: logits)
+        let postprocessEndTime = CFAbsoluteTimeGetCurrent()
+        let postprocessTime = postprocessEndTime - postprocessStartTime
+        print("[SeaDetector] Post-processing completed in \(String(format: "%.3f", postprocessTime)) seconds")
         
         // Determine if the image contains sea
         let containsSea = seaPercentage > minSeaFraction
@@ -141,18 +153,38 @@ class SeaDetector {
     /// - Returns: An image with the sea mask overlay
     func generateSeaMaskVisualization(for image: UIImage) throws -> UIImage {
         // Preprocess the image
+        let preprocessStartTime = CFAbsoluteTimeGetCurrent()
         let pixelBuffer = try preprocessImage(image)
+        let preprocessEndTime = CFAbsoluteTimeGetCurrent()
+        let preprocessTime = preprocessEndTime - preprocessStartTime
+        print("[SeaDetector] Visualization preprocessing completed in \(String(format: "%.3f", preprocessTime)) seconds")
         
+        return try generateSeaMaskVisualization(multiArray: pixelBuffer, originalImage: image)
+    }
+    
+    /// Generate a visualization of the sea mask using a preprocessed MLMultiArray
+    /// - Parameters:
+    ///   - multiArray: The preprocessed MLMultiArray
+    ///   - originalImage: The original image to overlay the mask on
+    /// - Returns: An image with the sea mask overlay
+    func generateSeaMaskVisualization(multiArray: MLMultiArray, originalImage: UIImage) throws -> UIImage {
         // Create model input
-        let input = try MLDictionaryFeatureProvider(dictionary: ["pixel_values": pixelBuffer])
+        let input = try MLDictionaryFeatureProvider(dictionary: ["pixel_values": multiArray])
         
         // Run inference
+        let inferenceStartTime = CFAbsoluteTimeGetCurrent()
         let outputFeatures = try model.prediction(from: input)
+        let inferenceEndTime = CFAbsoluteTimeGetCurrent()
+        let inferenceTime = inferenceEndTime - inferenceStartTime
+        print("[SeaDetector] Visualization model inference completed in \(String(format: "%.3f", inferenceTime)) seconds")
         
         // Get logits from output
         guard let logitsMultiArray = outputFeatures.featureValue(for: "logits")?.multiArrayValue else {
             throw SeaDetectorError.invalidOutput
         }
+        
+        // Post-processing steps
+        let postprocessStartTime = CFAbsoluteTimeGetCurrent()
         
         // Convert to a more usable format
         let logits = convertMultiArrayToArray(logitsMultiArray)
@@ -161,15 +193,24 @@ class SeaDetector {
         let binaryMask = generateSeaMask(from: logits)
         
         // Resize mask to match original image
-        let resizedMask = resizeMask(binaryMask, to: image.size)
+        let resizedMask = resizeMask(binaryMask, to: originalImage.size)
         
         // Create overlay image
-        return createOverlayImage(originalImage: image, mask: resizedMask)
+        let result = createOverlayImage(originalImage: originalImage, mask: resizedMask)
+        
+        let postprocessEndTime = CFAbsoluteTimeGetCurrent()
+        let postprocessTime = postprocessEndTime - postprocessStartTime
+        print("[SeaDetector] Visualization post-processing completed in \(String(format: "%.3f", postprocessTime)) seconds")
+        
+        return result
     }
     
     // MARK: - Private Methods
     
-    private func preprocessImage(_ image: UIImage) throws -> MLMultiArray {
+    /// Preprocess an image for the sea detection model
+    /// - Parameter image: The input image
+    /// - Returns: An MLMultiArray ready for model input
+    func preprocessImage(_ image: UIImage) throws -> MLMultiArray {
         // Use the shared preprocessing method
         return try image.preprocessForML(targetSize: CGSize(width: inputWidth, height: inputHeight))
     }
@@ -180,8 +221,6 @@ class SeaDetector {
         let numClasses = multiArray.shape[1].intValue
         let height = multiArray.shape[2].intValue
         let width = multiArray.shape[3].intValue
-        
-        print("Converting MLMultiArray with shape: [\(batchSize), \(numClasses), \(height), \(width)]")
         
         // Create 4D array
         var result = [[[[Float]]]](repeating: [[[Float]]](repeating: [[Float]](repeating: [Float](repeating: 0, count: width), count: height), count: numClasses), count: batchSize)

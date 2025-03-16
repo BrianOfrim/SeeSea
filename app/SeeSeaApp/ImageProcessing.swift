@@ -18,10 +18,6 @@ extension UIImage {
         let width = Int(self.size.width)
         let height = Int(self.size.height)
         
-        print("Original image size: \(self.size)")
-        print("Scale: \(self.scale)")
-        print("Orientation: \(self.imageOrientation.rawValue)")
-        
         var pixelBuffer: CVPixelBuffer?
         // Creating the pixel buffer as BGRA but we will treat it as RGBA
         let status = CVPixelBufferCreate(kCFAllocatorDefault,
@@ -49,26 +45,8 @@ extension UIImage {
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         )
-    
-        // Print the format of the cgImage
-        if let bitmapInfo = self.cgImage?.bitmapInfo.rawValue {
-            print("CGImage format: \(bitmapInfo)")
-        } else {
-            print("CGImage format: unknown")
-        }
         
         context?.draw(self.cgImage!, in: CGRect(x: 0, y: 0, width: width, height: height))
-        
-        // Debug: Print first few raw pixel values
-        _ = CVPixelBufferGetBytesPerRow(buffer)
-        let baseAddress = CVPixelBufferGetBaseAddress(buffer)!
-        let bufferPtr = baseAddress.assumingMemoryBound(to: UInt8.self)
-        
-        print("First 5 raw pixels (RGBA format):")
-        for i in 0..<5 {
-            let offset = i * 4
-            print("Pixel \(i): R:\(bufferPtr[offset]), G:\(bufferPtr[offset+1]), B:\(bufferPtr[offset+2]), A:\(bufferPtr[offset+3])")
-        }
         
         return buffer
     }
@@ -97,9 +75,6 @@ extension MLMultiArray {
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         
-        print("\nProcessing image:")
-        print("Input dimensions: \(width)x\(height)")
-        
         // Create MLMultiArray with shape [1, 3, height, width] for RGB (channels-first format)
         let shape: [NSNumber] = [1, 3, NSNumber(value: height), NSNumber(value: width)]
         let mlArray = try MLMultiArray(shape: shape, dataType: .float32)
@@ -122,13 +97,6 @@ extension MLMultiArray {
         let buffer = UnsafeBufferPointer(start: baseAddress.assumingMemoryBound(to: UInt8.self),
                                        count: bufferSize)
         
-        // Debug: Print first pixel raw values
-        print("\nFirst pixel raw values (RGBA format):")
-        print("R: \(buffer[0])")
-        print("G: \(buffer[1])")
-        print("B: \(buffer[2])")
-        print("A: \(buffer[3])")
-        
         // Copy and normalize pixels
         for y in 0..<height {
             for x in 0..<width {
@@ -144,31 +112,11 @@ extension MLMultiArray {
                 let g = normalize ? (gNorm - imageMean[1]) / imageStd[1] : gNorm
                 let b = normalize ? (bNorm - imageMean[2]) / imageStd[2] : bNorm
                 
-                // Debug: Print first pixel normalized values
-                if y == 0 && x == 0 {
-                    print("\nFirst pixel normalized values (RGB):")
-                    print("R: \(r)")
-                    print("G: \(g)")
-                    print("B: \(b)")
-                }
-                
                 // Set values in MLMultiArray in RGB order
                 mlArray[[0, 0, y, x] as [NSNumber]] = NSNumber(value: r)  // Red
                 mlArray[[0, 1, y, x] as [NSNumber]] = NSNumber(value: g)  // Green
                 mlArray[[0, 2, y, x] as [NSNumber]] = NSNumber(value: b)  // Blue
             }
-        }
-        
-        // Debug: Print first few values of each channel
-        print("\nFirst few values of each channel:")
-        for c in 0..<3 {
-            let channel = ["R", "G", "B"][c]
-            var values: [String] = []
-            for x in 0..<5 {
-                let value = mlArray[[0, c, 0, x] as [NSNumber]].doubleValue
-                values.append(String(format: "%.6f", value))
-            }
-            print("\(channel): \(values)")
         }
         
         // Initialize self with the shape and data from mlArray

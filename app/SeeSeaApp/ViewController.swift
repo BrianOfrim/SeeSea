@@ -14,10 +14,22 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
     private var originalImage: UIImage?
     private var visualizationImage: UIImage?
     private var showingVisualization = true
+    
+    // Store prediction results to avoid recomputing
+    private var seaPercentage: Float = 0
+    private var containsSea: Bool = false
+    private var waveWindPredictions: [Float]?
+    
+    // Track which mode was last processed
+    private var lastProcessedMode: Int = -1
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .white
+        
+        // Set up background image
+        setupBackgroundImage()
+        
+        // Set up UI components
         setupUI()
         
         do {
@@ -28,6 +40,25 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         }
     }
 
+    private func setupBackgroundImage() {
+        // Create a background image view
+        let backgroundImageView = UIImageView(frame: view.bounds)
+        backgroundImageView.image = UIImage(named: "Background")
+        backgroundImageView.contentMode = .scaleAspectFill
+        backgroundImageView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Add it as the bottom-most view
+        view.insertSubview(backgroundImageView, at: 0)
+        
+        // Make it fill the entire view
+        NSLayoutConstraint.activate([
+            backgroundImageView.topAnchor.constraint(equalTo: view.topAnchor),
+            backgroundImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backgroundImageView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
     func setupUI() {
         // Calculate safe area
         let safeArea = view.safeAreaLayoutGuide
@@ -35,8 +66,8 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         // Image view - takes up the entire screen
         imageView = UIImageView()
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        imageView.contentMode = .scaleAspectFill
-        imageView.backgroundColor = .lightGray
+        imageView.contentMode = .scaleAspectFit
+        imageView.backgroundColor = UIColor.black.withAlphaComponent(0.1)
         imageView.clipsToBounds = true
         view.addSubview(imageView)
         
@@ -44,7 +75,11 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         segmentControl = UISegmentedControl(items: ["Wave/Wind", "Sea Detection"])
         segmentControl.translatesAutoresizingMaskIntoConstraints = false
         segmentControl.selectedSegmentIndex = 0
-        segmentControl.backgroundColor = UIColor.white.withAlphaComponent(0.7)
+        segmentControl.backgroundColor = UIColor.white.withAlphaComponent(0.8)
+        segmentControl.layer.shadowColor = UIColor.black.cgColor
+        segmentControl.layer.shadowOffset = CGSize(width: 0, height: 2)
+        segmentControl.layer.shadowRadius = 3
+        segmentControl.layer.shadowOpacity = 0.3
         segmentControl.addTarget(self, action: #selector(segmentChanged), for: .valueChanged)
         view.addSubview(segmentControl)
         
@@ -53,12 +88,22 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         toggleButton.translatesAutoresizingMaskIntoConstraints = false
         
         var toggleConfig = UIButton.Configuration.filled()
-        toggleConfig.title = "Show Original"
-        toggleConfig.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.7)
+        toggleConfig.title = "Overlay"
+        toggleConfig.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.8)
         toggleConfig.baseForegroundColor = .white
-        toggleConfig.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+        toggleConfig.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
         toggleConfig.cornerStyle = .medium
+        // Use a smaller font size
+        toggleConfig.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = UIFont.systemFont(ofSize: 13, weight: .medium)
+            return outgoing
+        }
         toggleButton.configuration = toggleConfig
+        toggleButton.layer.shadowColor = UIColor.black.cgColor
+        toggleButton.layer.shadowOffset = CGSize(width: 0, height: 2)
+        toggleButton.layer.shadowRadius = 3
+        toggleButton.layer.shadowOpacity = 0.3
         
         toggleButton.addTarget(self, action: #selector(toggleVisualization), for: .touchUpInside)
         toggleButton.isHidden = true // Initially hidden
@@ -75,8 +120,12 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         // Create semi-transparent background for the label
         let overlayView = UIView()
         overlayView.translatesAutoresizingMaskIntoConstraints = false
-        overlayView.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-        overlayView.layer.cornerRadius = 6
+        overlayView.backgroundColor = UIColor.black.withAlphaComponent(0.7)
+        overlayView.layer.cornerRadius = 8
+        overlayView.layer.shadowColor = UIColor.black.cgColor
+        overlayView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        overlayView.layer.shadowRadius = 4
+        overlayView.layer.shadowOpacity = 0.4
         
         imageView.addSubview(overlayView)
         overlayView.addSubview(predictionLabel)
@@ -95,11 +144,15 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         // Use UIButtonConfiguration instead of contentEdgeInsets
         var config = UIButton.Configuration.filled()
         config.title = "Select Image"
-        config.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.7)
+        config.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.8)
         config.baseForegroundColor = .white
         config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 20, bottom: 10, trailing: 20)
         config.cornerStyle = .large
         selectButton.configuration = config
+        selectButton.layer.shadowColor = UIColor.black.cgColor
+        selectButton.layer.shadowOffset = CGSize(width: 0, height: 2)
+        selectButton.layer.shadowRadius = 3
+        selectButton.layer.shadowOpacity = 0.3
         
         selectButton.addTarget(self, action: #selector(openPhotoLibrary), for: .touchUpInside)
         view.addSubview(selectButton)
@@ -116,7 +169,7 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
             segmentControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             segmentControl.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.8),
             
-            // Toggle button - below segment control
+            // Toggle button - moved to the right side of the screen
             toggleButton.topAnchor.constraint(equalTo: segmentControl.bottomAnchor, constant: 12),
             toggleButton.trailingAnchor.constraint(equalTo: safeArea.trailingAnchor, constant: -12),
             
@@ -125,9 +178,11 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
             selectButton.bottomAnchor.constraint(equalTo: safeArea.bottomAnchor, constant: -20),
             
             // Overlay view constraints - position in top left corner with padding
+            // and ensure it doesn't overlap with the toggle button
             overlayView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor, constant: 12),
             overlayView.topAnchor.constraint(equalTo: segmentControl.bottomAnchor, constant: 12),
-            overlayView.widthAnchor.constraint(lessThanOrEqualTo: imageView.widthAnchor, multiplier: 0.7),
+            overlayView.trailingAnchor.constraint(lessThanOrEqualTo: toggleButton.leadingAnchor, constant: -12),
+            overlayView.widthAnchor.constraint(lessThanOrEqualTo: imageView.widthAnchor, multiplier: 0.6),
             
             // Prediction label constraints - inside the overlay with padding
             predictionLabel.topAnchor.constraint(equalTo: overlayView.topAnchor, constant: 6),
@@ -164,23 +219,122 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
 
     func imagePickerController(_ picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey : Any]) {
         if let selectedImage = info[.editedImage] as? UIImage ?? info[.originalImage] as? UIImage {
+            // Store the original image
+            self.originalImage = selectedImage
+            
+            // Display the original image
             imageView.image = selectedImage
+            
             predictionLabel.text = "Processing..."
             activityIndicator.startAnimating()
             
             // Hide toggle button when new image is selected
             toggleButton.isHidden = true
             
-            // Capture the selected segment index on the main thread
-            let selectedIndex = segmentControl.selectedSegmentIndex
+            // Reset cached results when a new image is selected
+            waveWindPredictions = nil
+            visualizationImage = nil
             
+            // Process both types of predictions in the background with truly shared preprocessing
             DispatchQueue.global(qos: .userInitiated).async {
-                if selectedIndex == 0 {
-                    // Wave/Wind prediction
-                    self.makePrediction(for: selectedImage)
-                } else {
-                    // Sea detection
-                    self.detectSea(in: selectedImage)
+                // Start timing the entire process
+                let totalStartTime = CFAbsoluteTimeGetCurrent()
+                
+                do {
+                    // Both models use 224x224 input size (hardcoded)
+                    let modelInputSize = CGSize(width: 224, height: 224)
+                    
+                    print("Preprocessing image to 224x224")
+                    
+                    // Preprocess the image once
+                    let preprocessStartTime = CFAbsoluteTimeGetCurrent()
+                    let preprocessedImage = try selectedImage.resize(to: modelInputSize)
+                    guard let preprocessedImage = preprocessedImage else {
+                        throw NSError(domain: "ImageProcessing", code: -1, 
+                                     userInfo: [NSLocalizedDescriptionKey: "Failed to resize image"])
+                    }
+                    let preprocessEndTime = CFAbsoluteTimeGetCurrent()
+                    let preprocessTime = preprocessEndTime - preprocessStartTime
+                    print("[Shared] Image preprocessing completed in \(String(format: "%.3f", preprocessTime)) seconds")
+                    
+                    // Create a shared MLMultiArray that both models can use
+                    let multiArrayStartTime = CFAbsoluteTimeGetCurrent()
+                    let sharedMultiArray = try preprocessedImage.preprocessForML(targetSize: modelInputSize)
+                    let multiArrayEndTime = CFAbsoluteTimeGetCurrent()
+                    let multiArrayTime = multiArrayEndTime - multiArrayStartTime
+                    print("[Shared] MLMultiArray conversion completed in \(String(format: "%.3f", multiArrayTime)) seconds")
+                    
+                    // Run both models in parallel using the shared preprocessed data
+                    let group = DispatchGroup()
+                    
+                    // Wave/Wind prediction task
+                    group.enter()
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do {
+                            let waveWindStartTime = CFAbsoluteTimeGetCurrent()
+                            let predictions = try self.seaPredictor?.predict(multiArray: sharedMultiArray)
+                            self.waveWindPredictions = predictions
+                            let waveWindEndTime = CFAbsoluteTimeGetCurrent()
+                            let waveWindTime = waveWindEndTime - waveWindStartTime
+                            print("Wave/Wind prediction completed in \(String(format: "%.3f", waveWindTime)) seconds")
+                            group.leave()
+                        } catch {
+                            print("Wave/Wind prediction failed: \(error)")
+                            group.leave()
+                        }
+                    }
+                    
+                    // Sea detection task
+                    group.enter()
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        do {
+                            let seaDetectionStartTime = CFAbsoluteTimeGetCurrent()
+                            
+                            // Detection step
+                            let (percentage, containsSea) = try self.seaDetector?.detectSea(multiArray: sharedMultiArray) ?? (0, false)
+                            self.seaPercentage = percentage
+                            self.containsSea = containsSea
+                            
+                            // Visualization step
+                            if let visualizedImage = try self.seaDetector?.generateSeaMaskVisualization(multiArray: sharedMultiArray, originalImage: selectedImage) {
+                                self.visualizationImage = visualizedImage
+                                let seaDetectionEndTime = CFAbsoluteTimeGetCurrent()
+                                let seaDetectionTime = seaDetectionEndTime - seaDetectionStartTime
+                                print("Sea detection completed in \(String(format: "%.3f", seaDetectionTime)) seconds")
+                            }
+                            group.leave()
+                        } catch {
+                            print("Sea detection failed: \(error)")
+                            group.leave()
+                        }
+                    }
+                    
+                    // Wait for both tasks to complete
+                    group.wait()
+                    
+                    let totalEndTime = CFAbsoluteTimeGetCurrent()
+                    let totalTime = totalEndTime - totalStartTime
+                    print("Total processing completed in \(String(format: "%.3f", totalTime)) seconds")
+                    
+                    // Update UI based on the current segment
+                    DispatchQueue.main.async {
+                        self.activityIndicator.stopAnimating()
+                        self.lastProcessedMode = self.segmentControl.selectedSegmentIndex
+                        
+                        // Show results based on current segment
+                        if self.segmentControl.selectedSegmentIndex == 0 {
+                            self.showWaveWindResults()
+                        } else {
+                            self.showSeaDetectionResults()
+                        }
+                    }
+                } catch {
+                    print("Image processing failed: \(error)")
+                    DispatchQueue.main.async {
+                        self.activityIndicator.stopAnimating()
+                        self.predictionLabel.text = "Processing failed: \(error.localizedDescription)"
+                        self.predictionLabel.superview?.isHidden = false
+                    }
                 }
             }
         }
@@ -191,104 +345,39 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         dismiss(animated: true)
     }
 
-    private func makePrediction(for image: UIImage) {
-        do {
-            let predictions = try seaPredictor?.predict(image: image)
-            
-            DispatchQueue.main.async {
-                self.activityIndicator.stopAnimating()
-                
-                if let predictions = predictions, predictions.count >= 2 {
-                    let wind_speed_mps = predictions[0]
-                    let wave_height_m = predictions[1]
-                    
-                    self.predictionLabel.text = String(format: "Wind Speed: %.1f m/s\nWave Height: %.1f m",
-                                                wind_speed_mps, wave_height_m)
-                    self.predictionLabel.superview?.isHidden = false
-                } else {
-                    self.predictionLabel.text = "Invalid prediction result"
-                    self.predictionLabel.superview?.isHidden = false
-                }
-            }
-        } catch {
-            DispatchQueue.main.async {
-                self.activityIndicator.stopAnimating()
-                self.predictionLabel.text = "Prediction failed"
-                self.predictionLabel.superview?.isHidden = false
-            }
-        }
-    }
-
     @objc func segmentChanged(_ sender: UISegmentedControl) {
-        if let image = imageView.image {
-            predictionLabel.text = "Processing..."
-            activityIndicator.startAnimating()
-            
+        print("Segment changed to: \(sender.selectedSegmentIndex)")
+        print("Original image exists: \(originalImage != nil)")
+        print("Visualization image exists: \(visualizationImage != nil)")
+        print("Wave/Wind predictions exist: \(waveWindPredictions != nil)")
+        
+        // Only proceed if we have an original image
+        if originalImage != nil {
             // Capture the selected segment index on the main thread
             let selectedIndex = sender.selectedSegmentIndex
             
             // Hide or show toggle button based on mode
             toggleButton.isHidden = selectedIndex == 0
             
-            DispatchQueue.global(qos: .userInitiated).async {
-                if selectedIndex == 0 {
-                    // Wave/Wind prediction
-                    self.makePrediction(for: image)
-                } else {
-                    // Sea detection
-                    self.detectSea(in: image)
-                }
-            }
-        }
-    }
-
-    private func detectSea(in image: UIImage) {
-        do {
-            // Store the original image
-            self.originalImage = image
+            // Update the last processed mode
+            lastProcessedMode = selectedIndex
             
-            // Get the sea percentage and containsSea boolean
-            let (percentage, containsSea) = try seaDetector?.detectSea(in: image) ?? (0, false)
-            
-            // Generate the visualization with sea mask overlay
-            if let visualizedImage = try seaDetector?.generateSeaMaskVisualization(for: image) {
-                // Store the visualization image
-                self.visualizationImage = visualizedImage
-                
-                DispatchQueue.main.async {
-                    self.activityIndicator.stopAnimating()
-                    
-                    // Update the image view with the visualization
-                    self.imageView.image = self.visualizationImage
-                    
-                    // Update the text label
-                    if containsSea {
-                        self.predictionLabel.text = "Sea detected: \(Int(percentage * 100))%"
-                    } else {
-                        self.predictionLabel.text = "No sea detected"
-                    }
-                    self.predictionLabel.superview?.isHidden = false
-                    
-                    // Show the toggle button
-                    self.toggleButton.isHidden = false
-                    self.showingVisualization = true
-                    self.toggleButton.configuration?.title = "Show Original"
-                    self.toggleButton.configuration?.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.7)
-                }
+            // Just update the UI with existing results
+            if selectedIndex == 0 {
+                // Show wave/wind results
+                print("Showing wave/wind results")
+                showWaveWindResults()
             } else {
-                DispatchQueue.main.async {
-                    self.activityIndicator.stopAnimating()
-                    self.predictionLabel.text = "Sea detection: \(Int(percentage * 100))%"
-                    self.predictionLabel.superview?.isHidden = false
-                    self.toggleButton.isHidden = true
-                }
+                // Show sea detection results
+                print("Showing sea detection results")
+                showSeaDetectionResults()
             }
-        } catch {
+        } else {
+            // No image selected yet
+            print("No original image available")
             DispatchQueue.main.async {
-                self.activityIndicator.stopAnimating()
-                self.predictionLabel.text = "Detection failed: \(error.localizedDescription)"
+                self.predictionLabel.text = "Please select an image first"
                 self.predictionLabel.superview?.isHidden = false
-                self.toggleButton.isHidden = true
             }
         }
     }
@@ -296,16 +385,119 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
     @objc func toggleVisualization() {
         showingVisualization = !showingVisualization
         
+        print("Toggle visualization - Showing \(showingVisualization ? "visualization" : "original") image")
+        print("Original image exists: \(originalImage != nil)")
+        print("Visualization image exists: \(visualizationImage != nil)")
+        
+        // Update toggle button configuration
+        var config = UIButton.Configuration.filled()
+        
         if showingVisualization {
             // Show visualization
-            toggleButton.configuration?.title = "Show Original"
-            toggleButton.configuration?.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.7)
-            imageView.image = visualizationImage
+            config.title = "Overlay"
+            config.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.8)
+            if let visualizedImage = visualizationImage {
+                imageView.image = visualizedImage
+                print("Set image view to visualization image")
+            } else {
+                print("Warning: Visualization image is nil")
+            }
         } else {
             // Show original
-            toggleButton.configuration?.title = "Show Visualization"
-            toggleButton.configuration?.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.7)
-            imageView.image = originalImage
+            config.title = "Original"
+            config.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.8)
+            if let originalImage = originalImage {
+                imageView.image = originalImage
+                print("Set image view to original image")
+            } else {
+                print("Warning: Original image is nil")
+            }
+        }
+        
+        // Apply common styling
+        config.baseForegroundColor = .white
+        config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+        config.cornerStyle = .medium
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = UIFont.systemFont(ofSize: 13, weight: .medium)
+            return outgoing
+        }
+        
+        toggleButton.configuration = config
+    }
+
+    // Helper method to show wave/wind results without recomputing
+    private func showWaveWindResults() {
+        if let predictions = waveWindPredictions, predictions.count >= 2 {
+            let wind_speed_mps = predictions[0]
+            let wave_height_m = predictions[1]
+            
+            self.predictionLabel.text = String(format: "Wind Speed: %.1f m/s\nWave Height: %.1f m",
+                                        wind_speed_mps, wave_height_m)
+            self.predictionLabel.superview?.isHidden = false
+            
+            // Show original image if we have one
+            if let originalImage = self.originalImage {
+                self.imageView.image = originalImage
+            }
+        } else {
+            self.predictionLabel.text = "Wave/Wind prediction results not available yet"
+            self.predictionLabel.superview?.isHidden = false
         }
     }
+    
+    // Helper method to show sea detection results without recomputing
+    private func showSeaDetectionResults() {
+        // Check if we have sea detection results
+        if visualizationImage == nil {
+            self.predictionLabel.text = "Sea detection results not available yet"
+            self.predictionLabel.superview?.isHidden = false
+            self.toggleButton.isHidden = true
+            return
+        }
+        
+        // Update the text label with existing results
+        if containsSea {
+            self.predictionLabel.text = "Sea detected: \(Int(seaPercentage * 100))%"
+        } else {
+            self.predictionLabel.text = "No sea detected"
+        }
+        self.predictionLabel.superview?.isHidden = false
+        
+        // Show the toggle button and ensure it's visible
+        self.toggleButton.isHidden = false
+        view.bringSubviewToFront(toggleButton)
+        
+        // Update toggle button configuration
+        var config = UIButton.Configuration.filled()
+        
+        // Show the appropriate image based on toggle state
+        if showingVisualization {
+            if let visualizedImage = self.visualizationImage {
+                self.imageView.image = visualizedImage
+            }
+            config.title = "Overlay"
+            config.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.8)
+        } else {
+            if let originalImage = self.originalImage {
+                self.imageView.image = originalImage
+            }
+            config.title = "Original"
+            config.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.8)
+        }
+        
+        // Apply common styling
+        config.baseForegroundColor = .white
+        config.contentInsets = NSDirectionalEdgeInsets(top: 6, leading: 12, bottom: 6, trailing: 12)
+        config.cornerStyle = .medium
+        config.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
+            var outgoing = incoming
+            outgoing.font = UIFont.systemFont(ofSize: 13, weight: .medium)
+            return outgoing
+        }
+        
+        toggleButton.configuration = config
+    }
 }
+
