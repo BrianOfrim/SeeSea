@@ -236,7 +236,7 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
             visualizationImage = nil
             
             // Process both types of predictions in the background with truly shared preprocessing
-            DispatchQueue.global(qos: .userInitiated).async {
+            let processingWorkItem = DispatchWorkItem {
                 // Start timing the entire process
                 let totalStartTime = CFAbsoluteTimeGetCurrent()
                 
@@ -269,7 +269,7 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                     
                     // Wave/Wind prediction task
                     group.enter()
-                    DispatchQueue.global(qos: .userInitiated).async {
+                    let waveWindWorkItem = DispatchWorkItem {
                         do {
                             let waveWindStartTime = CFAbsoluteTimeGetCurrent()
                             let predictions = try self.seaPredictor?.predict(multiArray: sharedMultiArray)
@@ -283,20 +283,21 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                             group.leave()
                         }
                     }
+                    DispatchQueue.global(qos: .userInitiated).async(execute: waveWindWorkItem)
                     
                     // Sea detection task
                     group.enter()
-                    DispatchQueue.global(qos: .userInitiated).async {
+                    let seaDetectionWorkItem = DispatchWorkItem {
                         do {
                             let seaDetectionStartTime = CFAbsoluteTimeGetCurrent()
                             
                             // Detection step
-                            let (percentage, containsSea) = try self.seaDetector?.detectSea(multiArray: sharedMultiArray) ?? (0, false)
+                            let (percentage, containsSea, _) = try self.seaDetector?.detectSea(multiArray: sharedMultiArray) ?? (0, false, nil)
                             self.seaPercentage = percentage
                             self.containsSea = containsSea
                             
                             // Visualization step
-                            if let visualizedImage = try self.seaDetector?.generateSeaMaskVisualization(multiArray: sharedMultiArray, originalImage: selectedImage) {
+                            if let (visualizedImage, _) = try self.seaDetector?.generateSeaMaskVisualization(multiArray: sharedMultiArray, originalImage: selectedImage) {
                                 self.visualizationImage = visualizedImage
                                 let seaDetectionEndTime = CFAbsoluteTimeGetCurrent()
                                 let seaDetectionTime = seaDetectionEndTime - seaDetectionStartTime
@@ -308,6 +309,7 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                             group.leave()
                         }
                     }
+                    DispatchQueue.global(qos: .userInitiated).async(execute: seaDetectionWorkItem)
                     
                     // Wait for both tasks to complete
                     group.wait()
@@ -337,6 +339,7 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                     }
                 }
             }
+            DispatchQueue.global(qos: .userInitiated).async(execute: processingWorkItem)
         }
         dismiss(animated: true)
     }

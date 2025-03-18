@@ -32,6 +32,26 @@ class SeaDetector {
     private var pipelineState: MTLComputePipelineState?
     private var useGPUAcceleration: Bool = false
     
+    // Flag to force using CPU even when GPU is available (for performance comparison)
+    private var forceCPUProcessing: Bool = false
+    
+    /// Public property to check if GPU acceleration is available and enabled
+    var isGPUAccelerationEnabled: Bool {
+        return useGPUAcceleration && !forceCPUProcessing
+    }
+    
+    /// Toggle between CPU and GPU processing for performance comparison
+    /// - Returns: A tuple containing the current processing mode and whether GPU is available
+    @discardableResult
+    func toggleProcessingMode() -> (mode: String, gpuAvailable: Bool) {
+        forceCPUProcessing = !forceCPUProcessing
+        
+        let mode = isGPUAccelerationEnabled ? "GPU" : "CPU"
+        print("[SeaDetector] Switched to \(mode) processing mode")
+        
+        return (mode, useGPUAcceleration)
+    }
+    
     // MARK: - Initialization
     
     init() throws {
@@ -153,9 +173,39 @@ class SeaDetector {
     // MARK: - Public Methods
     
     /// Detect sea percentage using a preprocessed MLMultiArray
-    /// - Parameter multiArray: The preprocessed MLMultiArray
-    /// - Returns: A tuple containing the sea percentage and whether the image contains sea
-    func detectSea(multiArray: MLMultiArray, minSeaFraction: Float = 0.2) throws -> (percentage: Float, containsSea: Bool) {
+    /// - Parameters:
+    ///   - multiArray: The preprocessed MLMultiArray
+    ///   - minSeaFraction: Minimum fraction of sea to consider the image as containing sea
+    ///   - processingMode: Optional processing mode override: "cpu", "gpu", or "compare"
+    /// - Returns: A tuple containing the sea percentage, whether the image contains sea, and performance data if comparison was requested
+    func detectSea(multiArray: MLMultiArray, 
+                   minSeaFraction: Float = 0.2,
+                   processingMode: String? = nil) throws -> (percentage: Float, containsSea: Bool, performanceData: [String: Any]?) {
+        // Handle processing mode override
+        let originalForceCPU = forceCPUProcessing
+        var performanceData: [String: Any]? = nil
+        
+        defer {
+            // Restore original processing mode when method exits
+            forceCPUProcessing = originalForceCPU
+        }
+        
+        if let mode = processingMode {
+            switch mode.lowercased() {
+            case "cpu":
+                forceCPUProcessing = true
+                print("[SeaDetector] Forcing CPU mode for this detection")
+            case "gpu":
+                forceCPUProcessing = false
+                print("[SeaDetector] Forcing GPU mode for this detection (if available)")
+            case "compare":
+                // Will run performance comparison after getting logits
+                print("[SeaDetector] Will run performance comparison")
+            default:
+                print("[SeaDetector] Unknown processing mode '\(mode)', using current setting")
+            }
+        }
+        
         // Create model input
         let input = try MLDictionaryFeatureProvider(dictionary: ["pixel_values": multiArray])
         
@@ -171,9 +221,14 @@ class SeaDetector {
             throw SeaDetectorError.invalidOutput
         }
         
-        // Convert to a more usable format and apply post-processing
+        // Convert to a more usable format
         let postprocessStartTime = CFAbsoluteTimeGetCurrent()
         let logits = convertMultiArrayToArray(logitsMultiArray)
+        
+        // Run performance comparison if requested
+        if processingMode?.lowercased() == "compare" {
+            performanceData = runPerformanceComparison(with: logits)
+        }
         
         // Apply post-processing
         let seaPercentage = applySeaPostProcessing(logits: logits)
@@ -184,13 +239,16 @@ class SeaDetector {
         // Determine if the image contains sea
         let containsSea = seaPercentage > minSeaFraction
         
-        return (seaPercentage, containsSea)
+        return (seaPercentage, containsSea, performanceData)
     }
     
     /// Generate a visualization of the sea mask
-    /// - Parameter image: The input image
-    /// - Returns: An image with the sea mask overlay
-    func generateSeaMaskVisualization(for image: UIImage) throws -> UIImage {
+    /// - Parameters:
+    ///   - image: The input image
+    ///   - processingMode: Optional processing mode override: "cpu", "gpu", or "compare"
+    /// - Returns: A tuple containing the visualization image and performance data if comparison was requested
+    func generateSeaMaskVisualization(for image: UIImage, 
+                                     processingMode: String? = nil) throws -> (UIImage, [String: Any]?) {
         // Preprocess the image
         let preprocessStartTime = CFAbsoluteTimeGetCurrent()
         let pixelBuffer = try preprocessImage(image)
@@ -198,15 +256,41 @@ class SeaDetector {
         let preprocessTime = preprocessEndTime - preprocessStartTime
         print("[SeaDetector] Visualization preprocessing completed in \(String(format: "%.3f", preprocessTime)) seconds")
         
-        return try generateSeaMaskVisualization(multiArray: pixelBuffer, originalImage: image)
+        return try generateSeaMaskVisualization(multiArray: pixelBuffer, originalImage: image, processingMode: processingMode)
     }
     
     /// Generate a visualization of the sea mask using a preprocessed MLMultiArray
     /// - Parameters:
     ///   - multiArray: The preprocessed MLMultiArray
     ///   - originalImage: The original image to overlay the mask on
-    /// - Returns: An image with the sea mask overlay
-    func generateSeaMaskVisualization(multiArray: MLMultiArray, originalImage: UIImage) throws -> UIImage {
+    ///   - processingMode: Optional processing mode override: "cpu", "gpu", or "compare"
+    /// - Returns: A tuple containing the visualization image and performance data if comparison was requested
+    func generateSeaMaskVisualization(multiArray: MLMultiArray, originalImage: UIImage, processingMode: String? = nil) throws -> (UIImage, [String: Any]?) {
+        // Handle processing mode override
+        let originalForceCPU = forceCPUProcessing
+        var performanceData: [String: Any]? = nil
+        
+        defer {
+            // Restore original processing mode when method exits
+            forceCPUProcessing = originalForceCPU
+        }
+        
+        if let mode = processingMode {
+            switch mode.lowercased() {
+            case "cpu":
+                forceCPUProcessing = true
+                print("[SeaDetector] Forcing CPU mode for this visualization")
+            case "gpu":
+                forceCPUProcessing = false
+                print("[SeaDetector] Forcing GPU mode for this visualization (if available)")
+            case "compare":
+                // Will run performance comparison after getting logits
+                print("[SeaDetector] Will run performance comparison")
+            default:
+                print("[SeaDetector] Unknown processing mode '\(mode)', using current setting")
+            }
+        }
+        
         // Create model input
         let input = try MLDictionaryFeatureProvider(dictionary: ["pixel_values": multiArray])
         
@@ -228,6 +312,11 @@ class SeaDetector {
         // Convert to a more usable format
         let logits = convertMultiArrayToArray(logitsMultiArray)
         
+        // Run performance comparison if requested
+        if processingMode?.lowercased() == "compare" {
+            performanceData = runPerformanceComparison(with: logits)
+        }
+        
         // Generate binary mask
         let binaryMask = generateSeaMask(from: logits)
         
@@ -235,13 +324,64 @@ class SeaDetector {
         let resizedMask = resizeMask(binaryMask, to: originalImage.size)
         
         // Create overlay image
-        let result = createOverlayImage(originalImage: originalImage, mask: resizedMask)
+        let resultImage = createOverlayImage(originalImage: originalImage, mask: resizedMask)
         
         let postprocessEndTime = CFAbsoluteTimeGetCurrent()
         let postprocessTime = postprocessEndTime - postprocessStartTime
         print("[SeaDetector] Visualization post-processing completed in \(String(format: "%.3f", postprocessTime)) seconds")
         
-        return result
+        return (resultImage, performanceData)
+    }
+    
+    /// Run performance comparison between CPU and GPU implementations
+    /// - Parameter logits: The logits to process
+    /// - Returns: A dictionary with performance metrics
+    func runPerformanceComparison(with logits: [[[[Float]]]]) -> [String: Any] {
+        guard useGPUAcceleration, 
+              let device = metalDevice, 
+              let queue = commandQueue, 
+              let pipeline = pipelineState else {
+            print("[SeaDetector] GPU acceleration not available for comparison")
+            return ["error": "GPU acceleration not available"]
+        }
+        
+        print("[SeaDetector] Running performance comparison...")
+        
+        // Run GPU implementation
+        print("[SeaDetector] Testing GPU performance...")
+        let gpuStartTime = CFAbsoluteTimeGetCurrent()
+        let _ = processLogitsToSeaMaskGPU(logits: logits, device: device, queue: queue, pipeline: pipeline)
+        let gpuEndTime = CFAbsoluteTimeGetCurrent()
+        let gpuTime = gpuEndTime - gpuStartTime
+        
+        // Run CPU implementation
+        print("[SeaDetector] Testing CPU performance...")
+        let cpuStartTime = CFAbsoluteTimeGetCurrent()
+        let _ = processLogitsToSeaMaskCPU(logits: logits)
+        let cpuEndTime = CFAbsoluteTimeGetCurrent()
+        let cpuTime = cpuEndTime - cpuStartTime
+        
+        // Calculate speedup
+        let speedup = cpuTime / gpuTime
+        
+        // Create results
+        let results: [String: Any] = [
+            "gpuTime": gpuTime,
+            "cpuTime": cpuTime,
+            "speedup": speedup,
+            "gpuTimeFormatted": String(format: "%.3f seconds", gpuTime),
+            "cpuTimeFormatted": String(format: "%.3f seconds", cpuTime),
+            "speedupFormatted": String(format: "%.2fx", speedup)
+        ]
+        
+        // Log results
+        print("=== Performance Comparison Results ===")
+        print("GPU processing time: \(results["gpuTimeFormatted"] as! String)")
+        print("CPU processing time: \(results["cpuTimeFormatted"] as! String)")
+        print("GPU speedup: \(results["speedupFormatted"] as! String)")
+        print("====================================")
+        
+        return results
     }
     
     // MARK: - Private Methods
@@ -321,9 +461,19 @@ class SeaDetector {
     
     /// Shared processing function to avoid code duplication and optimize performance
     private func processLogitsToSeaMask(logits: [[[[Float]]]]) -> [[Bool]] {
-        if useGPUAcceleration, let device = metalDevice, let queue = commandQueue, let pipeline = pipelineState {
+        // Only use GPU if it's available AND we're not forcing CPU processing
+        if useGPUAcceleration && !forceCPUProcessing, 
+           let device = metalDevice, 
+           let queue = commandQueue, 
+           let pipeline = pipelineState {
+            print("[SeaDetector] Using GPU processing")
             return processLogitsToSeaMaskGPU(logits: logits, device: device, queue: queue, pipeline: pipeline)
         } else {
+            if useGPUAcceleration && forceCPUProcessing {
+                print("[SeaDetector] GPU available but using CPU processing (forced for comparison)")
+            } else {
+                print("[SeaDetector] Using CPU processing")
+            }
             return processLogitsToSeaMaskCPU(logits: logits)
         }
     }
@@ -484,9 +634,6 @@ class SeaDetector {
         computeEncoder.setBuffer(seaLabelsBuffer, offset: 0, index: 2)
         computeEncoder.setBuffer(preventLabelsBuffer, offset: 0, index: 3)
         computeEncoder.setBuffer(maskBuffer, offset: 0, index: 4)
-        
-        // Calculate grid size (one thread per pixel)
-        let gridSize = MTLSize(width: width, height: height, depth: 1)
         
         // Calculate the thread group size
         let threadGroupSizeX = min(pipeline.threadExecutionWidth, width)
