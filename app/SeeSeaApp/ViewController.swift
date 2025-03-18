@@ -248,7 +248,7 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                     
                     // Preprocess the image once
                     let preprocessStartTime = CFAbsoluteTimeGetCurrent()
-                    let preprocessedImage = try selectedImage.resize(to: modelInputSize)
+                    let preprocessedImage = selectedImage.resize(to: modelInputSize)
                     guard let preprocessedImage = preprocessedImage else {
                         throw NSError(domain: "ImageProcessing", code: -1, 
                                      userInfo: [NSLocalizedDescriptionKey: "Failed to resize image"])

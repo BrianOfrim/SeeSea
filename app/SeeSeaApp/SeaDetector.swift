@@ -12,6 +12,10 @@ class SeaDetector {
     private let labelToId: [String: Int]
     private let idToLabel: [Int: String]
     
+    // Precomputed lookup values - calculated once during initialization
+    private let seaLabelIds: [Int]
+    private let preventLabelIdSet: Set<Int>
+    
     // Input dimensions for the model - hardcoded to 224x224
     private let _inputWidth: Int = 224
     private let _inputHeight: Int = 224
@@ -95,23 +99,22 @@ class SeaDetector {
             idToLabel[id] = label
         }
         self.idToLabel = idToLabel
+        
+        // Fix 'self' captured warnings - store in local variables first
+        let labelsToId = self.labelToId
+        let considerSea = seaConfig.consider_as_sea
+        let preventRelabel = seaConfig.prevent_relabel_if_top
+        
+        // Precompute label lookups at initialization time instead of every function call
+        self.seaLabelIds = considerSea.compactMap { labelsToId[$0] }
+        let preventLabelIds = preventRelabel.compactMap { labelsToId[$0] }
+        self.preventLabelIdSet = Set(preventLabelIds)
+        
+        print("Precomputed sea label IDs: \(seaLabelIds)")
+        print("Precomputed prevent label IDs: \(preventLabelIdSet)")
     }
     
     // MARK: - Public Methods
-    
-    /// Detect sea percentage in an image
-    /// - Parameter image: The input image
-    /// - Returns: A tuple containing the sea percentage and whether the image contains sea
-    func detectSea(in image: UIImage, minSeaFraction: Float = 0.2) throws -> (percentage: Float, containsSea: Bool) {
-        // Preprocess the image
-        let preprocessStartTime = CFAbsoluteTimeGetCurrent()
-        let pixelBuffer = try preprocessImage(image)
-        let preprocessEndTime = CFAbsoluteTimeGetCurrent()
-        let preprocessTime = preprocessEndTime - preprocessStartTime
-        print("[SeaDetector] Preprocessing completed in \(String(format: "%.3f", preprocessTime)) seconds")
-        
-        return try detectSea(multiArray: pixelBuffer, minSeaFraction: minSeaFraction)
-    }
     
     /// Detect sea percentage using a preprocessed MLMultiArray
     /// - Parameter multiArray: The preprocessed MLMultiArray
@@ -241,188 +244,98 @@ class SeaDetector {
     }
     
     private func applySeaPostProcessing(logits: [[[[Float]]]]) -> Float {
-        // Get dimensions
-        let numClasses = logits[0].count
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        // Get dimensions (fix unused variable warning)
         let height = logits[0][0].count
         let width = logits[0][0][0].count
         
-        // Apply softmax to get probabilities
-        var probabilities = [[[Float]]](repeating: [[Float]](repeating: [Float](repeating: 0, count: width), count: height), count: numClasses)
-        
-        for h in 0..<height {
-            for w in 0..<width {
-                // Find max for numerical stability
-                var maxLogit = logits[0][0][h][w]
-                for c in 1..<numClasses {
-                    maxLogit = max(maxLogit, logits[0][c][h][w])
-                }
-                
-                // Compute exp(logit - maxLogit)
-                var sumExp: Float = 0
-                for c in 0..<numClasses {
-                    let expValue = exp(logits[0][c][h][w] - maxLogit)
-                    probabilities[c][h][w] = expValue
-                    sumExp += expValue
-                }
-                
-                // Normalize
-                for c in 0..<numClasses {
-                    probabilities[c][h][w] /= sumExp
-                }
-            }
-        }
-        
-        // Get the argmax for each pixel (top prediction)
-        var topPredictions = [[Int]](repeating: [Int](repeating: 0, count: width), count: height)
-        for h in 0..<height {
-            for w in 0..<width {
-                var maxClassIndex = 0
-                var maxValue = probabilities[0][h][w]
-                
-                for c in 1..<numClasses {
-                    if probabilities[c][h][w] > maxValue {
-                        maxValue = probabilities[c][h][w]
-                        maxClassIndex = c
-                    }
-                }
-                
-                topPredictions[h][w] = maxClassIndex
-            }
-        }
-        
-        // Create mask for pixels that should not be relabeled based on prevent_relabel_if_top
-        var preventMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
-        for label in preventRelabelIfTop {
-            if let labelId = labelToId[label] {
-                for h in 0..<height {
-                    for w in 0..<width {
-                        if topPredictions[h][w] == labelId {
-                            preventMask[h][w] = true
-                        }
-                    }
-                }
-            }
-        }
-        
-        // Calculate sum of probabilities for sea-related classes
-        var seaConfidenceSum = [[Float]](repeating: [Float](repeating: 0, count: width), count: height)
-        for label in considerAsSea {
-            if let labelId = labelToId[label] {
-                for h in 0..<height {
-                    for w in 0..<width {
-                        seaConfidenceSum[h][w] += probabilities[labelId][h][w]
-                    }
-                }
-            }
-        }
-        
-        // Create mask where sea confidence exceeds threshold and is not in prevent_mask
-        var binaryMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
-        for h in 0..<height {
-            for w in 0..<width {
-                if seaConfidenceSum[h][w] > confidenceThreshold && !preventMask[h][w] {
-                    binaryMask[h][w] = true
-                }
-            }
-        }
+        // Process the logits and get the binary mask using shared code
+        let binaryMask = processLogitsToSeaMask(logits: logits)
         
         // Compute sea percentage
-        var seaPixels: Int = 0
+        var seaPixels = 0
         let totalPixels = height * width
         
-        for h in 0..<height {
-            for w in 0..<width {
-                if binaryMask[h][w] {
-                    seaPixels += 1
-                }
-            }
+        // Use a flattened approach to count sea pixels
+        for row in binaryMask {
+            // Use a faster way to count true values in a Bool array
+            seaPixels += row.lazy.filter { $0 }.count
         }
         
         let seaPercentage = Float(seaPixels) / Float(totalPixels)
+        
+        let endTime = CFAbsoluteTimeGetCurrent()
+        print("[SeaDetector] Sea percentage calculation completed in \(String(format: "%.3f", endTime - startTime)) seconds")
+        
         return min(max(seaPercentage, 0.0), 1.0)
     }
     
     private func generateSeaMask(from logits: [[[[Float]]]]) -> [[Bool]] {
-        // Get dimensions
-        let numClasses = logits[0].count
+        let startTime = CFAbsoluteTimeGetCurrent()
+        
+        // Use the shared processing function
+        let binaryMask = processLogitsToSeaMask(logits: logits)
+        
+        let endTime = CFAbsoluteTimeGetCurrent()
+        print("[SeaDetector] Mask generation completed in \(String(format: "%.3f", endTime - startTime)) seconds")
+        
+        return binaryMask
+    }
+    
+    /// Shared processing function to avoid code duplication and optimize performance
+    private func processLogitsToSeaMask(logits: [[[[Float]]]]) -> [[Bool]] {
+        // Get dimensions from the model output tensor
+        // logits shape is [batch, classes, height, width]
+        // Fix unused variable warning with underscore
+        _ = logits.count        // Should be 1
+        let numClasses = logits[0].count    // Number of semantic classes 
         let height = logits[0][0].count
         let width = logits[0][0][0].count
         
-        // Apply softmax to get probabilities
-        var probabilities = [[[Float]]](repeating: [[Float]](repeating: [Float](repeating: 0, count: width), count: height), count: numClasses)
+        // Preallocate result array only - we'll compute values on the fly
+        var binaryMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
         
+        // Process each pixel in a single pass
         for h in 0..<height {
             for w in 0..<width {
-                // Find max for numerical stability
+                // Find class with maximum logit value (argmax operation)
+                // Start with class 0 as the initial candidate
                 var maxLogit = logits[0][0][h][w]
-                for c in 1..<numClasses {
-                    maxLogit = max(maxLogit, logits[0][c][h][w])
-                }
-                
-                // Compute exp(logit - maxLogit)
-                var sumExp: Float = 0
-                for c in 0..<numClasses {
-                    let expValue = exp(logits[0][c][h][w] - maxLogit)
-                    probabilities[c][h][w] = expValue
-                    sumExp += expValue
-                }
-                
-                // Normalize
-                for c in 0..<numClasses {
-                    probabilities[c][h][w] /= sumExp
-                }
-            }
-        }
-        
-        // Get the argmax for each pixel (top prediction)
-        var topPredictions = [[Int]](repeating: [Int](repeating: 0, count: width), count: height)
-        for h in 0..<height {
-            for w in 0..<width {
                 var maxClassIndex = 0
-                var maxValue = probabilities[0][h][w]
                 
+                // Compare against all other classes
                 for c in 1..<numClasses {
-                    if probabilities[c][h][w] > maxValue {
-                        maxValue = probabilities[c][h][w]
+                    if logits[0][c][h][w] > maxLogit {
+                        maxLogit = logits[0][c][h][w]
                         maxClassIndex = c
                     }
                 }
                 
-                topPredictions[h][w] = maxClassIndex
-            }
-        }
-        
-        // Create mask for pixels that should not be relabeled based on prevent_relabel_if_top
-        var preventMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
-        for label in preventRelabelIfTop {
-            if let labelId = labelToId[label] {
-                for h in 0..<height {
-                    for w in 0..<width {
-                        if topPredictions[h][w] == labelId {
-                            preventMask[h][w] = true
-                        }
+                // Skip early if this pixel belongs to a class we don't want to relabel
+                // (e.g., sky which should never be classified as sea)
+                if preventLabelIdSet.contains(maxClassIndex) {
+                    continue
+                }
+                
+                // Compute softmax probabilities
+                // First, calculate denominator (sum of all exp values)
+                var sumExp: Float = 0
+                for c in 0..<numClasses {
+                    sumExp += exp(logits[0][c][h][w] - maxLogit)
+                }
+                
+                // Compute sea confidence as the sum of probabilities of all sea-related classes
+                var seaConfidence: Float = 0
+                for labelId in seaLabelIds {
+                    if labelId < numClasses {
+                        // Calculate probability using softmax formula
+                        seaConfidence += exp(logits[0][labelId][h][w] - maxLogit) / sumExp
                     }
                 }
-            }
-        }
-        
-        // Calculate sum of probabilities for sea-related classes
-        var seaConfidenceSum = [[Float]](repeating: [Float](repeating: 0, count: width), count: height)
-        for label in considerAsSea {
-            if let labelId = labelToId[label] {
-                for h in 0..<height {
-                    for w in 0..<width {
-                        seaConfidenceSum[h][w] += probabilities[labelId][h][w]
-                    }
-                }
-            }
-        }
-        
-        // Create mask where sea confidence exceeds threshold and is not in prevent_mask
-        var binaryMask = [[Bool]](repeating: [Bool](repeating: false, count: width), count: height)
-        for h in 0..<height {
-            for w in 0..<width {
-                if seaConfidenceSum[h][w] > confidenceThreshold && !preventMask[h][w] {
+                
+                // Mark this pixel as sea if confidence exceeds threshold
+                if seaConfidence > confidenceThreshold {
                     binaryMask[h][w] = true
                 }
             }
@@ -437,14 +350,34 @@ class SeaDetector {
         let targetHeight = Int(size.height)
         let targetWidth = Int(size.width)
         
+        // Early exit if no resizing is needed
+        if originalHeight == targetHeight && originalWidth == targetWidth {
+            return mask
+        }
+        
         var resizedMask = [[Bool]](repeating: [Bool](repeating: false, count: targetWidth), count: targetHeight)
         
+        // Precompute scaling factors
+        let scaleY = Float(originalHeight) / Float(targetHeight)
+        let scaleX = Float(originalWidth) / Float(targetWidth)
+        
+        // Precompute source coordinates mapping to avoid redundant calculations
+        var srcYMap = [Int](repeating: 0, count: targetHeight)
+        var srcXMap = [Int](repeating: 0, count: targetWidth)
+        
         for y in 0..<targetHeight {
+            srcYMap[y] = min(Int(Float(y) * scaleY), originalHeight - 1)
+        }
+        
+        for x in 0..<targetWidth {
+            srcXMap[x] = min(Int(Float(x) * scaleX), originalWidth - 1)
+        }
+        
+        // Apply the mapping efficiently
+        for y in 0..<targetHeight {
+            let srcY = srcYMap[y]
             for x in 0..<targetWidth {
-                // Simple nearest neighbor interpolation
-                let srcY = min(Int(Float(y) * Float(originalHeight) / Float(targetHeight)), originalHeight - 1)
-                let srcX = min(Int(Float(x) * Float(originalWidth) / Float(targetWidth)), originalWidth - 1)
-                
+                let srcX = srcXMap[x]
                 resizedMask[y][x] = mask[srcY][srcX]
             }
         }
@@ -453,29 +386,57 @@ class SeaDetector {
     }
     
     private func createOverlayImage(originalImage: UIImage, mask: [[Bool]]) -> UIImage {
+        let startTime = CFAbsoluteTimeGetCurrent()
         let width = Int(originalImage.size.width)
         let height = Int(originalImage.size.height)
         
-        UIGraphicsBeginImageContextWithOptions(originalImage.size, false, originalImage.scale)
+        // Use a more efficient approach with UIGraphicsImageRenderer
+        let renderer = UIGraphicsImageRenderer(size: originalImage.size)
         
-        // Draw original image
-        originalImage.draw(at: .zero)
-        
-        // Create overlay context
-        let context = UIGraphicsGetCurrentContext()!
-        context.setFillColor(UIColor.red.withAlphaComponent(0.5).cgColor)
-        
-        // Draw mask
-        for y in 0..<height {
-            for x in 0..<width {
-                if y < mask.count && x < mask[y].count && mask[y][x] {
-                    context.fill(CGRect(x: x, y: y, width: 1, height: 1))
+        let resultImage = renderer.image { context in
+            // Draw original image
+            originalImage.draw(at: .zero)
+            
+            // Set the overlay color
+            context.cgContext.setFillColor(UIColor.red.withAlphaComponent(0.5).cgColor)
+            
+            // Prepare path for more efficient drawing
+            let path = CGMutablePath()
+            
+            // Process mask row by row and create paths for efficiency
+            for y in 0..<min(height, mask.count) {
+                // Track consecutive true pixels for batching
+                var currentRun: (start: Int, length: Int)? = nil
+                
+                for x in 0..<min(width, mask[y].count) {
+                    if mask[y][x] {
+                        if let run = currentRun {
+                            // Extend current run
+                            currentRun = (run.start, run.length + 1)
+                        } else {
+                            // Start new run
+                            currentRun = (x, 1)
+                        }
+                    } else if let run = currentRun {
+                        // End of a run, add rectangle to path
+                        path.addRect(CGRect(x: run.start, y: y, width: run.length, height: 1))
+                        currentRun = nil
+                    }
+                }
+                
+                // Handle run that extends to the end of the row
+                if let run = currentRun {
+                    path.addRect(CGRect(x: run.start, y: y, width: run.length, height: 1))
                 }
             }
+            
+            // Draw all sea areas at once
+            context.cgContext.addPath(path)
+            context.cgContext.fillPath()
         }
         
-        let resultImage = UIGraphicsGetImageFromCurrentImageContext()!
-        UIGraphicsEndImageContext()
+        let endTime = CFAbsoluteTimeGetCurrent()
+        print("[SeaDetector] Overlay creation completed in \(String(format: "%.3f", endTime - startTime)) seconds")
         
         return resultImage
     }
