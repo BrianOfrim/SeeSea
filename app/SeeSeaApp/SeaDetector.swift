@@ -5,6 +5,9 @@ import Metal
 import MetalKit
 
 class SeaDetector {
+    // Configuration
+    static var enableVisualization: Bool = true  // Set to false to disable visualization
+    
     // MARK: - Properties
     
     private let model: MLModel
@@ -34,6 +37,9 @@ class SeaDetector {
     
     // Flag to force using CPU even when GPU is available (for performance comparison)
     private var forceCPUProcessing: Bool = false
+    
+    // Store visualization image
+    private var visualizationImage: UIImage?
     
     /// Public property to check if GPU acceleration is available and enabled
     var isGPUAccelerationEnabled: Bool {
@@ -180,30 +186,30 @@ class SeaDetector {
     /// - Returns: A tuple containing the sea percentage, whether the image contains sea, and performance data if comparison was requested
     func detectSea(multiArray: MLMultiArray, 
                    minSeaFraction: Float = 0.2,
-                   processingMode: String? = nil) throws -> (percentage: Float, containsSea: Bool, performanceData: [String: Any]?) {
+                   processingMode: String = "gpu",
+                   enableDetailedLogs: Bool = false) throws -> (percentage: Float, containsSea: Bool, performanceData: PerformanceData?) {
         // Handle processing mode override
         let originalForceCPU = forceCPUProcessing
-        var performanceData: [String: Any]? = nil
+        var performanceData: PerformanceData? = nil
         
         defer {
             // Restore original processing mode when method exits
             forceCPUProcessing = originalForceCPU
         }
         
-        if let mode = processingMode {
-            switch mode.lowercased() {
-            case "cpu":
-                forceCPUProcessing = true
-                print("[SeaDetector] Forcing CPU mode for this detection")
-            case "gpu":
-                forceCPUProcessing = false
-                print("[SeaDetector] Forcing GPU mode for this detection (if available)")
-            case "compare":
-                // Will run performance comparison after getting logits
-                print("[SeaDetector] Will run performance comparison")
-            default:
-                print("[SeaDetector] Unknown processing mode '\(mode)', using current setting")
-            }
+        // Set processing mode
+        switch processingMode.lowercased() {
+        case "cpu":
+            forceCPUProcessing = true
+            print("[SeaDetector] Forcing CPU mode for this detection")
+        case "gpu":
+            forceCPUProcessing = false
+            print("[SeaDetector] Forcing GPU mode for this detection (if available)")
+        case "compare":
+            // Will run performance comparison after getting logits
+            print("[SeaDetector] Will run performance comparison")
+        default:
+            print("[SeaDetector] Unknown processing mode '\(processingMode)', using current setting")
         }
         
         // Create model input
@@ -226,7 +232,7 @@ class SeaDetector {
         let logits = convertMultiArrayToArray(logitsMultiArray)
         
         // Run performance comparison if requested
-        if processingMode?.lowercased() == "compare" {
+        if processingMode.lowercased() == "compare" {
             performanceData = runPerformanceComparison(with: logits)
         }
         
@@ -238,25 +244,8 @@ class SeaDetector {
         
         // Determine if the image contains sea
         let containsSea = seaPercentage > minSeaFraction
-        
+                
         return (seaPercentage, containsSea, performanceData)
-    }
-    
-    /// Generate a visualization of the sea mask
-    /// - Parameters:
-    ///   - image: The input image
-    ///   - processingMode: Optional processing mode override: "cpu", "gpu", or "compare"
-    /// - Returns: A tuple containing the visualization image and performance data if comparison was requested
-    func generateSeaMaskVisualization(for image: UIImage, 
-                                     processingMode: String? = nil) throws -> (UIImage, [String: Any]?) {
-        // Preprocess the image
-        let preprocessStartTime = CFAbsoluteTimeGetCurrent()
-        let pixelBuffer = try preprocessImage(image)
-        let preprocessEndTime = CFAbsoluteTimeGetCurrent()
-        let preprocessTime = preprocessEndTime - preprocessStartTime
-        print("[SeaDetector] Visualization preprocessing completed in \(String(format: "%.3f", preprocessTime)) seconds")
-        
-        return try generateSeaMaskVisualization(multiArray: pixelBuffer, originalImage: image, processingMode: processingMode)
     }
     
     /// Generate a visualization of the sea mask using a preprocessed MLMultiArray
@@ -265,31 +254,7 @@ class SeaDetector {
     ///   - originalImage: The original image to overlay the mask on
     ///   - processingMode: Optional processing mode override: "cpu", "gpu", or "compare"
     /// - Returns: A tuple containing the visualization image and performance data if comparison was requested
-    func generateSeaMaskVisualization(multiArray: MLMultiArray, originalImage: UIImage, processingMode: String? = nil) throws -> (UIImage, [String: Any]?) {
-        // Handle processing mode override
-        let originalForceCPU = forceCPUProcessing
-        var performanceData: [String: Any]? = nil
-        
-        defer {
-            // Restore original processing mode when method exits
-            forceCPUProcessing = originalForceCPU
-        }
-        
-        if let mode = processingMode {
-            switch mode.lowercased() {
-            case "cpu":
-                forceCPUProcessing = true
-                print("[SeaDetector] Forcing CPU mode for this visualization")
-            case "gpu":
-                forceCPUProcessing = false
-                print("[SeaDetector] Forcing GPU mode for this visualization (if available)")
-            case "compare":
-                // Will run performance comparison after getting logits
-                print("[SeaDetector] Will run performance comparison")
-            default:
-                print("[SeaDetector] Unknown processing mode '\(mode)', using current setting")
-            }
-        }
+    func generateSeaMaskVisualization(multiArray: MLMultiArray, originalImage: UIImage?, enableDetailedLogs: Bool = false) throws -> (UIImage?) {
         
         // Create model input
         let input = try MLDictionaryFeatureProvider(dictionary: ["pixel_values": multiArray])
@@ -312,37 +277,32 @@ class SeaDetector {
         // Convert to a more usable format
         let logits = convertMultiArrayToArray(logitsMultiArray)
         
-        // Run performance comparison if requested
-        if processingMode?.lowercased() == "compare" {
-            performanceData = runPerformanceComparison(with: logits)
-        }
-        
         // Generate binary mask
         let binaryMask = generateSeaMask(from: logits)
         
         // Resize mask to match original image
-        let resizedMask = resizeMask(binaryMask, to: originalImage.size)
+        let resizedMask = resizeMask(binaryMask, to: originalImage?.size ?? CGSize(width: inputWidth, height: inputHeight))
         
         // Create overlay image
-        let resultImage = createOverlayImage(originalImage: originalImage, mask: resizedMask)
+        let resultImage = createOverlayImage(originalImage: originalImage ?? UIImage(named: "placeholder")!, mask: resizedMask)
         
         let postprocessEndTime = CFAbsoluteTimeGetCurrent()
         let postprocessTime = postprocessEndTime - postprocessStartTime
         print("[SeaDetector] Visualization post-processing completed in \(String(format: "%.3f", postprocessTime)) seconds")
         
-        return (resultImage, performanceData)
+        return resultImage
     }
     
     /// Run performance comparison between CPU and GPU implementations
     /// - Parameter logits: The logits to process
     /// - Returns: A dictionary with performance metrics
-    func runPerformanceComparison(with logits: [[[[Float]]]]) -> [String: Any] {
+    func runPerformanceComparison(with logits: [[[[Float]]]]) -> PerformanceData? {
         guard useGPUAcceleration, 
               let device = metalDevice, 
               let queue = commandQueue, 
               let pipeline = pipelineState else {
             print("[SeaDetector] GPU acceleration not available for comparison")
-            return ["error": "GPU acceleration not available"]
+            return nil
         }
         
         print("[SeaDetector] Running performance comparison...")
@@ -381,7 +341,7 @@ class SeaDetector {
         print("GPU speedup: \(results["speedupFormatted"] as! String)")
         print("====================================")
         
-        return results
+        return PerformanceData(results: results)
     }
     
     // MARK: - Private Methods
@@ -1012,6 +972,10 @@ class SeaDetector {
 }
 
 // MARK: - Supporting Types
+
+struct PerformanceData {
+    let results: [String: Any]
+}
 
 struct SeaConfig: Decodable {
     let consider_as_sea: [String]

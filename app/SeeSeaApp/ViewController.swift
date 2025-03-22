@@ -158,13 +158,13 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         view.addSubview(selectButton)
         
         NSLayoutConstraint.activate([
-            // Image view constraints - fill the entire view
+            // Image view constraints - fill the entire view, extending under safe areas
             imageView.topAnchor.constraint(equalTo: view.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             
-            // Segment control - at the top
+            // Segment control - at the top safe area
             segmentControl.topAnchor.constraint(equalTo: safeArea.topAnchor, constant: 12),
             segmentControl.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             segmentControl.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.8),
@@ -200,10 +200,6 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Print frames after layout
-        print("Image view frame: \(imageView.frame)")
-        print("Prediction label frame: \(predictionLabel.frame)")
-        print("Activity indicator frame: \(activityIndicator.frame)")
     }
 
     @objc func openPhotoLibrary() {
@@ -292,17 +288,22 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                             let seaDetectionStartTime = CFAbsoluteTimeGetCurrent()
                             
                             // Detection step
-                            let (percentage, containsSea, _) = try self.seaDetector?.detectSea(multiArray: sharedMultiArray) ?? (0, false, nil)
+                            let (percentage, containsSea, _) = try self.seaDetector?.detectSea(multiArray: sharedMultiArray, processingMode: "cpu") ?? (0, false, nil)
                             self.seaPercentage = percentage
                             self.containsSea = containsSea
                             
-                            // Visualization step
-                            if let (visualizedImage, _) = try self.seaDetector?.generateSeaMaskVisualization(multiArray: sharedMultiArray, originalImage: selectedImage) {
-                                self.visualizationImage = visualizedImage
-                                let seaDetectionEndTime = CFAbsoluteTimeGetCurrent()
-                                let seaDetectionTime = seaDetectionEndTime - seaDetectionStartTime
-                                print("Sea detection completed in \(String(format: "%.3f", seaDetectionTime)) seconds")
+                            let seaDetectionEndTime = CFAbsoluteTimeGetCurrent()
+                            let seaDetectionTime = seaDetectionEndTime - seaDetectionStartTime
+                            print("Sea detection completed in \(String(format: "%.3f", seaDetectionTime)) seconds")
+                            
+                            if(SeaDetector.enableVisualization){
+                                // Visualization step
+                                if let visualizedImage = try self.seaDetector?.generateSeaMaskVisualization(multiArray: sharedMultiArray, originalImage: selectedImage) {
+                                    self.visualizationImage = visualizedImage
+      
+                                }
                             }
+
                             group.leave()
                         } catch {
                             print("Sea detection failed: \(error)")
@@ -349,18 +350,13 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
     }
 
     @objc func segmentChanged(_ sender: UISegmentedControl) {
-        print("Segment changed to: \(sender.selectedSegmentIndex)")
-        print("Original image exists: \(originalImage != nil)")
-        print("Visualization image exists: \(visualizationImage != nil)")
-        print("Wave/Wind predictions exist: \(waveWindPredictions != nil)")
-        
         // Only proceed if we have an original image
         if originalImage != nil {
             // Capture the selected segment index on the main thread
             let selectedIndex = sender.selectedSegmentIndex
             
-            // Hide or show toggle button based on mode
-            toggleButton.isHidden = selectedIndex == 0
+            // Hide or show toggle button based on mode and visualization setting
+            toggleButton.isHidden = selectedIndex == 0 || !SeaDetector.enableVisualization
             
             // Update the last processed mode
             lastProcessedMode = selectedIndex
@@ -368,16 +364,13 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
             // Just update the UI with existing results
             if selectedIndex == 0 {
                 // Show wave/wind results
-                print("Showing wave/wind results")
                 showWaveWindResults()
             } else {
                 // Show sea detection results
-                print("Showing sea detection results")
                 showSeaDetectionResults()
             }
         } else {
             // No image selected yet
-            print("No original image available")
             DispatchQueue.main.async {
                 self.predictionLabel.text = "Please select an image first"
                 self.predictionLabel.superview?.isHidden = false
@@ -388,10 +381,6 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
     @objc func toggleVisualization() {
         showingVisualization = !showingVisualization
         
-        print("Toggle visualization - Showing \(showingVisualization ? "visualization" : "original") image")
-        print("Original image exists: \(originalImage != nil)")
-        print("Visualization image exists: \(visualizationImage != nil)")
-        
         // Update toggle button configuration
         var config = UIButton.Configuration.filled()
         
@@ -401,7 +390,6 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
             config.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.8)
             if let visualizedImage = visualizationImage {
                 imageView.image = visualizedImage
-                print("Set image view to visualization image")
             } else {
                 print("Warning: Visualization image is nil")
             }
@@ -411,7 +399,6 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
             config.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.8)
             if let originalImage = originalImage {
                 imageView.image = originalImage
-                print("Set image view to original image")
             } else {
                 print("Warning: Original image is nil")
             }
@@ -468,26 +455,35 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         }
         self.predictionLabel.superview?.isHidden = false
         
-        // Show the toggle button and ensure it's visible
-        self.toggleButton.isHidden = false
-        view.bringSubviewToFront(toggleButton)
+        // Show the toggle button only if visualization is enabled
+        self.toggleButton.isHidden = !SeaDetector.enableVisualization
+        if SeaDetector.enableVisualization {
+            view.bringSubviewToFront(toggleButton)
+        }
         
         // Update toggle button configuration
         var config = UIButton.Configuration.filled()
         
-        // Show the appropriate image based on toggle state
-        if showingVisualization {
-            if let visualizedImage = self.visualizationImage {
-                self.imageView.image = visualizedImage
+        // Show the appropriate image based on toggle state and visualization setting
+        if SeaDetector.enableVisualization {
+            if showingVisualization {
+                if let visualizedImage = self.visualizationImage {
+                    self.imageView.image = visualizedImage
+                }
+                config.title = "Overlay"
+                config.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.8)
+            } else {
+                if let originalImage = self.originalImage {
+                    self.imageView.image = originalImage
+                }
+                config.title = "Original"
+                config.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.8)
             }
-            config.title = "Overlay"
-            config.baseBackgroundColor = UIColor.systemGreen.withAlphaComponent(0.8)
         } else {
+            // If visualization is disabled, always show original image
             if let originalImage = self.originalImage {
                 self.imageView.image = originalImage
             }
-            config.title = "Original"
-            config.baseBackgroundColor = UIColor.systemBlue.withAlphaComponent(0.8)
         }
         
         // Apply common styling
