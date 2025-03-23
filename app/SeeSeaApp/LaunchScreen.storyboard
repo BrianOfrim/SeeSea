@@ -16,19 +16,25 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="SeeSea" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="f7c-gh-3dY">
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="SeeSea" textAlignment="center" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="f7c-8d-2t3">
                                 <rect key="frame" x="16" y="411" width="361" height="30"/>
-                                <fontDescription key="fontDescription" type="system" weight="bold" pointSize="25"/>
-                                <color key="textColor" white="0.0" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                                <fontDescription key="fontDescription" type="system" pointSize="25"/>
+                                <nil key="textColor"/>
                                 <nil key="highlightedColor"/>
                             </label>
+                            <activityIndicatorView opaque="NO" contentMode="scaleToFill" horizontalHuggingPriority="750" verticalHuggingPriority="750" style="large" translatesAutoresizingMaskIntoConstraints="NO" id="YRO-k0-Ey4">
+                                <rect key="frame" x="181.66666666666669" y="451" width="30" height="30"/>
+                                <animations/>
+                            </activityIndicatorView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="6Tk-OE-BBY"/>
-                        <color key="backgroundColor" white="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+                        <color key="backgroundColor" systemColor="systemBackgroundColor"/>
                         <constraints>
-                            <constraint firstItem="f7c-gh-3dY" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="Xf3-gh-3dY"/>
-                            <constraint firstItem="f7c-gh-3dY" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="16" id="dY2-gh-3dY"/>
-                            <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="f7c-gh-3dY" secondAttribute="trailing" constant="16" id="fY2-gh-3dY"/>
+                            <constraint firstItem="f7c-8d-2t3" firstAttribute="leading" secondItem="6Tk-OE-BBY" secondAttribute="leading" constant="16" id="7tg-hh-2t3"/>
+                            <constraint firstItem="YRO-k0-Ey4" firstAttribute="centerX" secondItem="Ze5-6b-2t3" secondAttribute="centerX" id="8dY-LV-cR7"/>
+                            <constraint firstItem="f7c-8d-2t3" firstAttribute="centerY" secondItem="Ze5-6b-2t3" secondAttribute="centerY" id="Mgh-2t-2t3"/>
+                            <constraint firstItem="YRO-k0-Ey4" firstAttribute="top" secondItem="f7c-8d-2t3" secondAttribute="bottom" constant="10" id="vKD-yf-xVj"/>
+                            <constraint firstItem="6Tk-OE-BBY" firstAttribute="trailing" secondItem="f7c-8d-2t3" secondAttribute="trailing" constant="16" id="x7j-FC-K8j"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -37,4 +43,9 @@
             <point key="canvasLocation" x="53" y="375"/>
         </scene>
     </scenes>
+    <resources>
+        <systemColor name="systemBackgroundColor">
+            <color white="1" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
+        </systemColor>
+    </resources>
 </document> 

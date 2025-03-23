@@ -5,34 +5,8 @@ import UIKit
 class SeaPredictor {
     private let seeseaModel: regression_model
     
-    init() throws {
-        print("Initializing SeaPredictor...")
-        
-        // First try to find the compiled model
-        if let modelURL = Bundle.main.url(forResource: "regression_model", withExtension: "mlmodelc") {
-            print("Found compiled model at: \(modelURL.path)")
-            self.seeseaModel = try regression_model(contentsOf: modelURL)
-            print("Model loaded successfully")
-            return
-        }
-        
-        // If that fails, try to find the package
-        if let modelURL = Bundle.main.url(forResource: "regression_model", withExtension: "mlpackage") {
-            print("Found model package at: \(modelURL.path)")
-            self.seeseaModel = try regression_model(contentsOf: modelURL)
-            print("Model loaded successfully")
-            return
-        }
-        
-        // If we get here, we couldn't find the model
-        print("Could not find model. Listing available resources:")
-        let resources = Bundle.main.paths(forResourcesOfType: "", inDirectory: nil)
-        for resource in resources {
-            print("   - \(resource)")
-        }
-        
-        throw NSError(domain: "SeaPredictor", code: -1,
-                     userInfo: [NSLocalizedDescriptionKey: "Failed to find model"])
+    init(modelPath: URL) throws {
+        self.seeseaModel = try regression_model(contentsOf: modelPath)
     }
     
     func predict(image: UIImage) throws -> [Float] {

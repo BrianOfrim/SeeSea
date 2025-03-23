@@ -32,9 +32,28 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         // Set up UI components
         setupUI()
         
+        guard let detectModelURL = Bundle.main.url(forResource: "sea_segmentation_base", withExtension: "mlmodelc") else{
+            print("Failed to find sea_segmentation_base.mlpackage")
+            return
+        }
+        
+        guard let predictModelURL = Bundle.main.url(forResource: "regression_model", withExtension: "mlmodelc") else{
+            print("Failed to find regression_model.mlpackage")
+            return
+        }
+
+        // Load sea configuration
+        guard let configURL = Bundle.main.url(forResource: "sea_config", withExtension: "json") else{
+            print("Failed to find sea_config.json")
+            return
+        }
+        
         do {
-            seaPredictor = try SeaPredictor()
-            seaDetector = try SeaDetector()
+            let configData = try Data(contentsOf: configURL)
+            let seaConfig = try JSONDecoder().decode(SeaConfig.self, from: configData)
+            
+            seaPredictor = try SeaPredictor(modelPath: predictModelURL)
+            seaDetector = try SeaDetector(modelPath: detectModelURL, config: seaConfig)
         } catch {
             print("Failed to initialize models: \(error)")
         }
@@ -288,9 +307,13 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                             let seaDetectionStartTime = CFAbsoluteTimeGetCurrent()
                             
                             // Detection step
-                            let (percentage, containsSea, _) = try self.seaDetector?.detectSea(multiArray: sharedMultiArray, processingMode: "cpu") ?? (0, false, nil)
-                            self.seaPercentage = percentage
-                            self.containsSea = containsSea
+                            let seaMask = try self.seaDetector?.detectSea(multiArray: sharedMultiArray)
+                            guard let seaMask = seaMask else {
+                                throw SeaDetectorError.invalidOutput
+                            }
+
+                            self.seaPercentage = SeaDetector.calculateSeaFraction(mask: seaMask)
+                            self.containsSea = self.seaPercentage > 0.2
                             
                             let seaDetectionEndTime = CFAbsoluteTimeGetCurrent()
                             let seaDetectionTime = seaDetectionEndTime - seaDetectionStartTime
@@ -298,9 +321,8 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                             
                             if(SeaDetector.enableVisualization){
                                 // Visualization step
-                                if let visualizedImage = try self.seaDetector?.generateSeaMaskVisualization(multiArray: sharedMultiArray, originalImage: selectedImage) {
+                                if let visualizedImage = try self.seaDetector?.generateSeaMaskVisualization(mask: seaMask, originalImage: selectedImage) {
                                     self.visualizationImage = visualizedImage
-      
                                 }
                             }
 
