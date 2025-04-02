@@ -475,14 +475,41 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                 // Both models use 224x224 input size
                 let modelInputSize = CGSize(width: 224, height: 224)
                 
-                // Rotate the image 90 degrees clockwise before processing (landscape orientation for model)
-                guard let rotatedImage = rotateImage(image, byDegrees: 90) else {
-                    print("[ERROR] Failed to rotate image")
-                    return
+                // Debug the original image
+                print("[DEBUG] Processing image - Size: \(image.size), Orientation: \(image.imageOrientation.rawValue)")
+                
+                // For gallery images, we need to respect their original orientation
+                var inputImage = image
+                
+                // If this is a camera image (in portrait mode), rotate it
+                // If from gallery, use the image orientation to determine if rotation is needed
+                if lastProcessedMode == 2 {  // Live Camera mode
+                    // Always rotate camera images as we've been doing
+                    guard let rotatedImage = rotateImage(image, byDegrees: 90) else {
+                        print("[ERROR] Failed to rotate image")
+                        return
+                    }
+                    inputImage = rotatedImage
+                } else {
+                    // For gallery images, check if we need to rotate based on orientation
+                    // Most gallery images will already have proper orientation metadata
+                    if image.imageOrientation == .up {
+                        // Standard orientation - sky should be on top already
+                        inputImage = image
+                    } else {
+                        // Non-standard orientation - normalize first
+                        // This creates a new image with .up orientation and applied transforms
+                        UIGraphicsBeginImageContextWithOptions(image.size, false, image.scale)
+                        image.draw(in: CGRect(origin: .zero, size: image.size))
+                        let normalizedImage = UIGraphicsGetImageFromCurrentImageContext()
+                        UIGraphicsEndImageContext()
+                        
+                        inputImage = normalizedImage ?? image
+                    }
                 }
                 
-                // Preprocess the rotated image
-                guard let preprocessedImage = rotatedImage.resize(to: modelInputSize),
+                // Preprocess the image
+                guard let preprocessedImage = inputImage.resize(to: modelInputSize),
                       let multiArray = try? preprocessedImage.preprocessForML(targetSize: modelInputSize) else {
                     print("[ERROR] Failed to preprocess image")
                     return
@@ -503,7 +530,7 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
                 var visualizedImage: UIImage? = nil
                 if containsSea && SeaDetector.enableVisualization {
                     // Get the visualization in landscape orientation (what the model expects)
-                    guard let maskVisualization = try detector.generateSeaMaskVisualization(mask: seaMask, originalImage: rotatedImage) else {
+                    guard let maskVisualization = try detector.generateSeaMaskVisualization(mask: seaMask, originalImage: inputImage) else {
                         print("[ERROR] Failed to generate mask visualization")
                         return
                     }
@@ -669,8 +696,13 @@ class ViewController: UIViewController, UIImagePickerControllerDelegate, UINavig
         if let selectedImage = info[.editedImage] as? UIImage ?? info[.originalImage] as? UIImage {
             originalImage = selectedImage
             imageView.image = selectedImage
-            // Process the selected image if needed
-            processFrameInBackground(selectedImage)
+            
+            // Process the selected image just like we do with camera frames
+            // NOTE: We don't need to apply the rotation in processFrameInBackground
+            // because we'll directly pass the image there and it handles rotation
+            autoreleasepool {
+                processFrameInBackground(selectedImage)
+            }
         }
         dismiss(animated: true)
     }
